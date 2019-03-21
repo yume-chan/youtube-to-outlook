@@ -28,7 +28,7 @@ export default interface Config {
     /**
      * The calendar name you want the events to go.
      * Your Microsoft Account must have write access.
-     * Case-sensitive.
+     * Must exsit, case-sensitive.
      */
     outlookCalendarName: string;
 

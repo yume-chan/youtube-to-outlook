@@ -2,7 +2,7 @@
 
 A "does work" script that grabs YouTube Live Broadcast information (from past, now, and future) and puts into your Outlook Calendar.
 
-I created this for my [vtuber-calendar](https://github.com/yume-chan/vtuber-calendar) project, as totaly manually maintenance costs too much time.
+I created this for my [vtuber-calendar](https://github.com/yume-chan/vtuber-calendar) project, as fully manually maintenance costs too much time.
 
 THIS README IS A PIECE OF JUNK!
 
@@ -16,7 +16,7 @@ Create a file called `config` at the root directory, with any file extension tha
 
 In the config file, export an object that comforms to the `Config` interface defined in `src/config.ts`.
 
-Here is an example for `config.json`:
+Here is a minimal example for `config.json`:
 
 ```json
 {
@@ -26,7 +26,8 @@ Here is an example for `config.json`:
             "id": "UCn14Z641OthNps7vppBvZFA",
             "nickname": "千草はな"
         }
-    ]
+    ],
+    "outlookCalendarName": "Vtuber"
 }
 ```
 
