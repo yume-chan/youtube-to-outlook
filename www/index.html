@@ -12,6 +12,22 @@
     <button id="login">login</button>
     <button id="auth">auth</button>
 
+    <div>
+        <label>Name: </label>
+        <input id="name" type="text">
+
+        <label>Time: </label>
+        <input id="time" type="text">
+
+        <label>Participants: </label>
+        <input id="participants" type="text">
+
+        <label>Link: </label>
+        <input id="link" type="text">
+
+        <button id="add">add</button>
+    </div>
+
     <script src="https://secure.aadcdn.microsoftonline-p.com/lib/0.2.4/js/msal.js"></script>
     <script src="https://secure.aadcdn.microsoftonline-p.com/lib/0.2.4/js/msal.min.js"></script>
 
@@ -30,6 +46,47 @@
                 const accessToken = await userAgentApplication.acquireTokenPopup(graphScopes);
                 document.write(accessToken);
             }
+        });
+
+        document.getElementById('add').addEventListener('click', async () => {
+            let response = await fetch('/token.txt');
+            const token = await response.text();
+
+            const start = document.getElementById('time').value;
+
+            let body = '';
+            const participants = document.getElementById('participants').value;
+            if (participants.length !== 0) {
+                body += 'participants:\n  - ' + participants.split(',').join('\n  - ') + '\n';
+            }
+            body += `references:\n  - ${document.getElementById('link').value}`;
+
+            response = await fetch('https://graph.microsoft.com/v1.0/me/calendars/AQMkADAwATMwMAItYjA1OS1lNzU4LTAwAi0wMAoARgAAA7hCBmolaJJAnmVrGmzj-uYHAKOeG3ezB8FFsTidUPunJqMAAAIBBgAAAPgmw6IHxv9LqbDluHzjsLkAAZU6LbwAAAA=/events', {
+                method: "POST",
+                credentials: 'omit',
+                headers: {
+                    "Content-Type": 'application/json',
+                    Authorization: 'Bearer ' + token.trim(),
+                },
+                body: JSON.stringify({
+                    subject: document.getElementById('name').value,
+                    start: {
+                        dateTime: start,
+                        timeZone: 'Asia/Tokyo',
+                    },
+                    end: {
+                        dateTime: new Date(new Date(start).getTime() + 60 * 60 * 1000).toISOString(),
+                        timeZone: 'Asia/Tokyo',
+                    },
+                    body: {
+                        content: body,
+                        contentType: 'text',
+                    },
+                }),
+                reminderMinutesBeforeStart: 5,
+            });
+
+            const result = await response.json();
         });
     </script>
 </body>
