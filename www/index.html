@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="zh-Hans-CN">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta http-equiv="X-UA-Compatible" content="ie=edge">
+    <title>YouTube to Outlook Authentication</title>
+</head>
+
+<body>
+    <button id="login">login</button>
+    <button id="auth">auth</button>
+
+    <script src="https://secure.aadcdn.microsoftonline-p.com/lib/0.2.4/js/msal.js"></script>
+    <script src="https://secure.aadcdn.microsoftonline-p.com/lib/0.2.4/js/msal.min.js"></script>
+
+    <script>
+        const userAgentApplication = new Msal.UserAgentApplication('afbfb2f7-9e80-4195-a199-7448b22bc8e2');
+        document.getElementById('login').addEventListener('click', async () => {
+            const graphScopes = ['user.read', 'Calendars.ReadWrite'];
+            await userAgentApplication.loginPopup(graphScopes);
+        });
+        document.getElementById('auth').addEventListener('click', async () => {
+            const graphScopes = ['user.read', 'Calendars.ReadWrite'];
+            try {
+                const accessToken = await userAgentApplication.acquireTokenSilent(graphScopes);
+                document.write(accessToken);
+            } catch (e) {
+                const accessToken = await userAgentApplication.acquireTokenPopup(graphScopes);
+                document.write(accessToken);
+            }
+        });
+    </script>
+</body>
+
+</html>
