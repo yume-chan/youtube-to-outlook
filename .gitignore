@@ -1,5 +1,5 @@
 node_modules
 
-./config.ts
+/config.ts
 www/token.txt
 youtube.json
