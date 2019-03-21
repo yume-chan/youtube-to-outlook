@@ -2,9 +2,7 @@
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
-import Config from './config';
-
-const config: Config = JSON.parse(readFileSync('./config.json', 'utf-8'));
+import config from '../config';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
@@ -117,6 +115,7 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
     if (typeof config.googleApiProxy === 'string') {
         Google.setProxy(config.googleApiProxy);
     }
+    Google.setHeaders(config.googleApiHeaders);
     Google.setApiKey(config.googleApiKey);
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
