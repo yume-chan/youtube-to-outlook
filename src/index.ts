@@ -125,10 +125,16 @@ async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
     }
 }
 
+async function parallel(tasks: (() => Promise<any>)[], concurrency: number = 10): Promise<void> {
+    while (tasks.length > 0) {
+        await Promise.all(tasks.splice(0, concurrency).map(x => x()));
+    }
+}
+
 function filterTitle(original: string) {
     return original
         .replace(/【(.*?)】/g, '')
-        .replace(/[.*?]/g, '')
+        .replace(/\[.*?\]/g, '')
         .trim()
 }
 
@@ -141,7 +147,7 @@ function filterTitle(original: string) {
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
 
-    if (true) {
+    if (false) {
         let ids: string[] = [];
         await Promise.all(config.youtubeChannels.map(channel => {
             return Promise.all((['completed', 'live', 'upcoming'] as const).map(async eventType => {
@@ -220,6 +226,8 @@ function filterTitle(original: string) {
 
     let view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
 
+    const tasks: (() => Promise<unknown>)[] = [];
+
     let toProcess = view.slice();
     while (toProcess.length !== 0) {
         const item = toProcess[0];
@@ -231,11 +239,10 @@ function filterTitle(original: string) {
 
         for (const duplicate of duplicates) {
             console.log('deleting', duplicate.subject);
-            await MicrosoftGraph.deleteEvent(duplicate.id);
+            tasks.push(() => MicrosoftGraph.deleteEvent(duplicate.id));
         }
     }
 
-    const tasks: Promise<unknown>[] = [];
     for (const video of details) {
         const channelName = config.youtubeChannels.find(x => x.id === video.snippet.channelId)!.nickname;
 
@@ -256,7 +263,7 @@ function filterTitle(original: string) {
                 return true;
             }
 
-            const xStartTime = new Date(x.start.dateTime).getTime();
+            const xStartTime = new Date(x.start.dateTime + 'Z').getTime();
             if (x.subject.startsWith(channelName) &&
                 Math.abs(xStartTime - new Date(startTime).getTime()) < 10 * 60 * 1000) {
                 return true;
@@ -287,7 +294,7 @@ function filterTitle(original: string) {
 
         if (!exist) {
             console.log('creating ', event.subject);
-            tasks.push(retry(() => MicrosoftGraph.createEvent(calendar.id, event)));
+            tasks.push(() => retry(() => MicrosoftGraph.createEvent(calendar.id, event)));
         } else {
             const data: any = Yaml.parse(exist.bodyPreview);
             if (data && data.title) {
@@ -310,9 +317,9 @@ function filterTitle(original: string) {
             }
 
             console.log('updating ', event.subject);
-            tasks.push(retry(() => MicrosoftGraph.updateEvent(exist.id, event)));
+            tasks.push(() => retry(() => MicrosoftGraph.updateEvent(exist.id, event)));
         }
     }
 
-    await tasks;
+    await parallel(tasks);
 })();
