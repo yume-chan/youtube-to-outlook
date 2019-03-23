@@ -92,6 +92,10 @@ export namespace Google {
                     responseBody.push(chunk);
                 });
 
+                response.on('error', (e) => {
+                    reject(e);
+                })
+
                 response.on('end', () => {
                     try {
                         const result = JSON.parse(responseBody.join(''));
@@ -113,11 +117,11 @@ export namespace Google {
 
                         resolve(result);
                     } catch (e) {
-                        setTimeout(() => {
-                            requestApi(path, params).then(resolve, reject);
-                        }, 1000);
+                        reject(e);
                     }
                 });
+            }).on('error', (e) => {
+                reject(e);
             }).end();
         });
     }

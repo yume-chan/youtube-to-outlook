@@ -1,4 +1,4 @@
-﻿import { readFileSync, writeFileSync } from 'fs';
+import { readFileSync, writeFileSync } from 'fs';
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
@@ -111,6 +111,27 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
     }
 }
 
+async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
+    let i = 0;
+    while (true) {
+        try {
+            return await body();
+        } catch (e) {
+            i++;
+            if (i === max) {
+                throw e;
+            }
+        }
+    }
+}
+
+function filterTitle(original: string) {
+    return original
+        .replace(/【(.*?)】/g, '')
+        .replace(/[.*?]/g, '')
+        .trim()
+}
+
 (async () => {
     if (typeof config.googleApiProxy === 'string') {
         Google.setProxy(config.googleApiProxy);
@@ -121,41 +142,41 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
 
     if (true) {
+        let ids: string[] = [];
+        await Promise.all(config.youtubeChannels.map(channel => {
+            return Promise.all((['completed', 'live', 'upcoming'] as const).map(async eventType => {
+                await retry(async () => {
+                    const result = await searchAll({
+                        part: ['id'],
+                        channelId: channel.id,
+                        type: 'video',
+                        eventType,
+                        order: "date",
+                        maxResults: 50,
+                    });
+
+                    ids = ids.concat(result);
+                });
+            }));
+        }));
+
         details = [];
-        for (const channel of config.youtubeChannels) {
-            const results = await Promise.all((
-                ['completed', 'live', 'upcoming'] as const)
-                .map(eventType => searchAll({
-                    part: ['id'],
-                    channelId: channel.id,
-                    type: 'video',
-                    eventType,
-                    order: "date",
-                    maxResults: 50,
-                })));
-
-            let ids: string[] = [];
-            for (const result of results) {
-                ids = ids.concat(result);
-            }
-
-            const tasks = [];
-            const slice = Math.ceil(ids.length / 50);
-            for (let i = 0; i < slice; i++) {
-                tasks.push(Google.YouTube.videos({
+        const tasks = [];
+        const slice = Math.ceil(ids.length / 50);
+        for (let i = 0; i < slice; i++) {
+            tasks.push(retry(async () => {
+                const result = await Google.YouTube.videos({
                     part: ['snippet', 'liveStreamingDetails'],
                     id: ids.slice(i * 50, (i + 1) * 50),
-                }));
-            }
+                });
 
-            const videos = await Promise.all(tasks);
-
-            for (const result of videos) {
                 details = details.concat(result.items);
-            }
-
-            writeFileSync('youtube.json', JSON.stringify(details, undefined, 4));
+            }));
         }
+
+        await Promise.all(tasks);
+
+        writeFileSync('youtube.json', JSON.stringify(details, undefined, 4));
     } else {
         details = JSON.parse(readFileSync('youtube.json', 'utf-8'));
     }
@@ -197,7 +218,7 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
     const viewStartTime = addDays(new Date(viewStart), -1);
     const viewEndTime = addDays(new Date(viewEnd), 1);
 
-    let view = (await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime)).value;
+    let view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
 
     let toProcess = view.slice();
     while (toProcess.length !== 0) {
@@ -214,11 +235,12 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
         }
     }
 
+    const tasks: Promise<unknown>[] = [];
     for (const video of details) {
         const channelName = config.youtubeChannels.find(x => x.id === video.snippet.channelId)!.nickname;
 
         const title = video.snippet.title;
-        const filtered = title.replace(/【(.*?)】/g, '').trim();
+        const filtered = filterTitle(title);
 
         const startTime = video.liveStreamingDetails.actualStartTime ||
             video.liveStreamingDetails.scheduledStartTime;
@@ -265,11 +287,11 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
 
         if (!exist) {
             console.log('creating ', event.subject);
-            await MicrosoftGraph.createEvent(calendar.id, event);
+            tasks.push(retry(() => MicrosoftGraph.createEvent(calendar.id, event)));
         } else {
             const data: any = Yaml.parse(exist.bodyPreview);
             if (data && data.title) {
-                const old_filtered = data.title.replace(/【(.*?)】/g, '').trim();
+                const old_filtered = filterTitle(data.title);
                 if (exist.subject !== `${channelName} - ${old_filtered}`) {
                     event.subject = exist.subject;
                 }
@@ -288,7 +310,9 @@ async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
             }
 
             console.log('updating ', event.subject);
-            await MicrosoftGraph.updateEvent(exist.id, event);
+            tasks.push(retry(() => MicrosoftGraph.updateEvent(exist.id, event)));
         }
     }
+
+    await tasks;
 })();

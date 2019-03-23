@@ -104,26 +104,29 @@ export interface Event {
     subject: string;
 }
 
-export async function getCalendarView(id: string, startDateTime: Date, endDateTime: Date): Promise<Response<Event[]>> {
-    let list: Event[] = [];
-    let skip = 0;
+export async function getCalendarView(id: string, startDateTime: Date, endDateTime: Date): Promise<Event[]> {
+    const result = await requestApi('GET', `/me/calendars/${id}/calendarView`, {
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString(),
+        $count: true,
+        $top: 0,
+    });
 
-    while (true) {
-        const result = await requestApi('GET', `/me/calendars/${id}/calendarView`, {
+    const count = result['@odata.count'];
+    const tasks: Promise<Response<Event[]>>[] = [];
+    for (let i = 0; i < count; i += 1000) {
+        tasks.push(requestApi('GET', `/me/calendars/${id}/calendarView`, {
             startDateTime: startDateTime.toISOString(),
             endDateTime: endDateTime.toISOString(),
             $count: true,
             $top: 1000,
-            $skip: skip,
-        });
-        list = list.concat(result.value);
-
-        if (!result['@odata.nextLink']) {
-            return { value: list };
-        }
-
-        skip += 1000;
+            $skip: i,
+        }));
     }
+    const results = await Promise.all(tasks);
+
+    // keep order
+    return results.reduce<Event[]>((list, result) => list.concat(result.value), []);
 }
 
 export function createEvent(id: string, event: Partial<Event>): Promise<Event> {
