@@ -147,7 +147,7 @@ function filterTitle(original: string) {
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
 
-    if (false) {
+    if (true) {
         let ids: string[] = [];
         await Promise.all(config.youtubeChannels.map(channel => {
             return Promise.all((['completed', 'live', 'upcoming'] as const).map(async eventType => {
