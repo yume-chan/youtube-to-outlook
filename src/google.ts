@@ -1,6 +1,7 @@
 import { request, globalAgent, Agent } from 'https';
 import { URLSearchParams } from 'url';
 import HttpsProxyAgent from 'https-proxy-agent';
+import { randomBytes } from 'crypto';
 
 export namespace Google {
     let key: string;
@@ -71,6 +72,7 @@ export namespace Google {
 
             const search = new URLSearchParams({
                 key: key,
+                quotaUser: randomBytes(20).toString('hex'),
                 ...normalized,
             });
 
@@ -154,6 +156,7 @@ export namespace Google {
             pageToken?: string;
             eventType?: 'completed' | 'live' | 'upcoming';
             order?: 'date';
+            publishedAfter?: string;
             maxResults?: number;
         }
 
@@ -161,6 +164,7 @@ export namespace Google {
             id: string;
 
             snippet: {
+                publishedAt: string;
                 channelId: string;
                 title: string;
                 liveBroadcastContent: 'none' | 'live' | 'upcoming';
