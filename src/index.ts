@@ -96,11 +96,11 @@ function deepMerge(...args: any[]): any {
     return result;
 }
 
-async function searchAll(params: Google.YouTubeDefinitions.SearchParameters) {
+async function searchAll(dispatcher: AsyncDispatcher, params: Google.YouTubeDefinitions.SearchParameters) {
     let list: string[] = [];
 
     while (true) {
-        const result = await retry(() => Google.YouTube.search(params));
+        const result = await retry(() => dispatcher.run(() => Google.YouTube.search(params)));
         list = list.concat(result.items.map(x => x.id.videoId));
 
         if (!result.nextPageToken) {
@@ -125,23 +125,66 @@ async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
     }
 }
 
-async function parallel(tasks: (() => Promise<any>)[], concurrency: number = 10): Promise<void> {
-    async function awaiter(x: () => Promise<any>) {
-        const result = await x();
-        if (tasks.length > 0) {
-            await awaiter(tasks.shift()!);
-        }
-        return result;
-    }
-
-    await Promise.all(tasks.splice(0, concurrency).map(awaiter));
-}
-
 function filterTitle(original: string) {
     return original
         .replace(/【(.*?)】/g, '')
         .replace(/\[.*?\]/g, '')
         .trim()
+}
+
+class AsyncSemaphore {
+    private _queue: Array<() => void> = [];
+
+    public wait(): Promise<void> {
+        const promise = new Promise<void>(resolve => {
+            this._queue.push(resolve);
+        });
+        return promise;
+    }
+
+    public notify() {
+        if (this._queue.length === 0) {
+            return;
+        }
+
+        this._queue.shift()!();
+    }
+}
+
+class AsyncDispatcher {
+    private _concurrency: number;
+
+    public get concurrency(): number { return this._concurrency; }
+
+    private _running: number = 0;
+
+    private _semaphore: AsyncSemaphore = new AsyncSemaphore();
+
+    constructor(concurrency: number = 10) {
+        this._concurrency = concurrency;
+    }
+
+    public async run<T, U extends any[]>(task: (...args: U) => Promise<T>, ...args: U): Promise<T> {
+        if (this._running === this._concurrency) {
+            await this._semaphore.wait();
+        }
+
+        this._running++;
+        try {
+            return await task(...args);
+        } finally {
+            this._running--;
+            this._semaphore.notify();
+        }
+    }
+
+    public async all<T>(tasks: Array<() => Promise<T>>): Promise<T[]> {
+        return Promise.all(tasks.map(item => this.run(item)));
+    }
+
+    public async map<T, U>(values: T[], task: (item: T) => Promise<U>): Promise<U[]> {
+        return Promise.all(values.map(item => this.run(task, item)));
+    }
 }
 
 (async () => {
@@ -160,6 +203,8 @@ function filterTitle(original: string) {
     // }, 0);
 
     // console.log(time / 1000);
+
+    const dispatcher: AsyncDispatcher = new AsyncDispatcher();
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
 
@@ -189,13 +234,13 @@ function filterTitle(original: string) {
         Google.setProxy(config.googleApiProxy);
     }
 
-    if (true) {
+    if (false) {
         Google.setHeaders(config.googleApiHeaders);
         Google.setApiKey(config.googleApiKey);
 
-        await parallel(config.youtubeChannels.map(channel => () => {
+        await Promise.all(config.youtubeChannels.map(channel => {
             return Promise.all((['completed', 'live', 'upcoming'] as const).map(async eventType => {
-                const result = await searchAll({
+                const result = await searchAll(dispatcher, {
                     part: ['id'],
                     channelId: channel.id,
                     type: 'video',
@@ -214,21 +259,22 @@ function filterTitle(original: string) {
         console.log(`${idSet.size} known ids after searching`);
 
         details = [];
-        const tasks = [];
+        const tasks: Promise<void>[] = [];
+
         const ids = Array.from(idSet);
         const slice = Math.ceil(ids.length / 50);
         for (let i = 0; i < slice; i++) {
-            tasks.push(() => retry(async () => {
+            tasks.push(retry(() => dispatcher.run(async () => {
                 const result = await Google.YouTube.videos({
                     part: ['snippet', 'liveStreamingDetails'],
                     id: ids.slice(i * 50, (i + 1) * 50),
                 });
 
                 details = details.concat(result.items);
-            }));
+            })));
         }
 
-        await parallel(tasks);
+        await Promise.all(tasks);
 
         writeFileSync('youtube.json', JSON.stringify(details, undefined, 4));
     }
@@ -272,7 +318,7 @@ function filterTitle(original: string) {
 
     let view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
 
-    const tasks: (() => Promise<unknown>)[] = [];
+    const tasks: Promise<unknown>[] = [];
 
     let toProcess = view.slice();
     while (toProcess.length !== 0) {
@@ -285,7 +331,7 @@ function filterTitle(original: string) {
 
         for (const duplicate of duplicates) {
             console.log('deleting', duplicate.subject);
-            tasks.push(() => MicrosoftGraph.deleteEvent(duplicate.id));
+            tasks.push(dispatcher.run(() => MicrosoftGraph.deleteEvent(duplicate.id)));
         }
     }
 
@@ -340,7 +386,7 @@ function filterTitle(original: string) {
 
         if (!exist) {
             console.log('creating ', event.subject);
-            tasks.push(() => retry(() => MicrosoftGraph.createEvent(calendar.id, event)));
+            tasks.push(retry(() => dispatcher.run(() => MicrosoftGraph.createEvent(calendar.id, event))));
         } else {
             const data: any = Yaml.parse(exist.bodyPreview);
             if (data && data.title) {
@@ -363,9 +409,9 @@ function filterTitle(original: string) {
             }
 
             console.log('updating ', event.subject);
-            tasks.push(() => retry(() => MicrosoftGraph.updateEvent(exist.id, event)));
+            tasks.push(retry(() => dispatcher.run(() => MicrosoftGraph.updateEvent(exist.id, event))));
         }
     }
 
-    await parallel(tasks);
+    await Promise.all(tasks);
 })();

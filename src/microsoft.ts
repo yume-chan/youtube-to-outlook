@@ -24,11 +24,12 @@ function requestApi(method: string, path: string, params: object): Promise<any> 
             headers['Content-Type'] = 'application/json';
         }
 
-        request({
+        const req = request({
             method,
             host: 'graph.microsoft.com',
             path: fullPath,
             headers: headers,
+            timeout: 10000,
             agent,
         }, (response) => {
             console.log(response.statusCode, response.statusMessage, fullPath);
@@ -63,7 +64,11 @@ function requestApi(method: string, path: string, params: object): Promise<any> 
                     requestApi(method, path, params).then(resolve, reject);
                 }
             });
-        }).end(method !== 'GET' ? JSON.stringify(params) : undefined);
+        }).on('timeout', () => {
+            req.abort();
+        });
+
+        req.end(method !== 'GET' ? JSON.stringify(params) : undefined);
     });
 }
 

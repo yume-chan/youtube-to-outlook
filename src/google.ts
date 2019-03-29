@@ -78,7 +78,11 @@ export namespace Google {
 
             const fullPath = `${path}?${search.toString()}`;
 
-            request({
+            const timeout = setTimeout(() => {
+                req.abort();
+            }, 10000);
+
+            const req = request({
                 hostname: host,
                 path: fullPath,
                 headers,
@@ -95,10 +99,12 @@ export namespace Google {
                 });
 
                 response.on('error', (e) => {
+                    clearTimeout(timeout)
                     reject(e);
                 })
 
                 response.on('end', () => {
+                    clearTimeout(timeout);
                     try {
                         const result = JSON.parse(responseBody.join(''));
 
@@ -124,7 +130,9 @@ export namespace Google {
                 });
             }).on('error', (e) => {
                 reject(e);
-            }).end();
+            });
+
+            req.end();
         });
     }
 
