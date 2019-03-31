@@ -1,5 +1,5 @@
 <!DOCTYPE html>
-<html lang="zh-Hans-CN">
+<html lang="en-US">
 
 <head>
     <meta charset="UTF-8">
@@ -11,6 +11,7 @@
 <body>
     <button id="login">login</button>
     <button id="auth">auth</button>
+    <textarea id="token"></textarea>
 
     <div>
         <label>Name: </label>
@@ -37,20 +38,20 @@
             const graphScopes = ['user.read', 'Calendars.ReadWrite'];
             await userAgentApplication.loginPopup(graphScopes);
         });
+
         document.getElementById('auth').addEventListener('click', async () => {
             const graphScopes = ['user.read', 'Calendars.ReadWrite'];
             try {
                 const accessToken = await userAgentApplication.acquireTokenSilent(graphScopes);
-                document.write(accessToken);
+                document.getElementById('token').value = accessToken;
             } catch (e) {
                 const accessToken = await userAgentApplication.acquireTokenPopup(graphScopes);
-                document.write(accessToken);
+                document.getElementById('token').value = accessToken;
             }
         });
 
         document.getElementById('add').addEventListener('click', async () => {
-            let response = await fetch('/token.txt');
-            const token = await response.text();
+            const token = document.getElementById('token').value;
 
             const start = document.getElementById('time').value;
 
@@ -82,8 +83,8 @@
                         content: body,
                         contentType: 'text',
                     },
+                    reminderMinutesBeforeStart: 5,
                 }),
-                reminderMinutesBeforeStart: 5,
             });
 
             const result = await response.json();

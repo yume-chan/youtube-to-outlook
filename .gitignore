@@ -3,3 +3,4 @@ node_modules
 /config.ts
 www/token.txt
 youtube.json
+week.csv

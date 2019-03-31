@@ -29,7 +29,7 @@ function requestApi(method: string, path: string, params: object): Promise<any> 
             host: 'graph.microsoft.com',
             path: fullPath,
             headers: headers,
-            timeout: 10000,
+            timeout: 60000,
             agent,
         }, (response) => {
             console.log(response.statusCode, response.statusMessage, fullPath);
@@ -119,12 +119,12 @@ export async function getCalendarView(id: string, startDateTime: Date, endDateTi
 
     const count = result['@odata.count'];
     const tasks: Promise<Response<Event[]>>[] = [];
-    for (let i = 0; i < count; i += 1000) {
+    for (let i = 0; i < count; i += 500) {
         tasks.push(requestApi('GET', `/me/calendars/${id}/calendarView`, {
             startDateTime: startDateTime.toISOString(),
             endDateTime: endDateTime.toISOString(),
             $count: true,
-            $top: 1000,
+            $top: 500,
             $skip: i,
         }));
     }

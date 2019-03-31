@@ -1,8 +1,10 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+﻿import { readFileSync, writeFileSync, existsSync } from 'fs';
+
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
 import config from '../config';
+import { stripHtml } from './util';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
@@ -188,22 +190,6 @@ class AsyncDispatcher {
 }
 
 (async () => {
-    // MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
-
-    // const calendars = await MicrosoftGraph.listCalendars();
-    // const calendar = calendars.value.find(x => x.name === config.outlookCalendarName)!;
-
-    // const viewStartTime = new Date('2019-03-18T00:00:00+08:00');
-    // const viewEndTime = new Date('2019-03-25T00:00:00+08:00');
-
-    // const view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
-
-    // const time = view.reduce((value, item) => {
-    //     return value + new Date(item.end.dateTime).getTime() - new Date(item.start.dateTime).getTime();
-    // }, 0);
-
-    // console.log(time / 1000);
-
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
@@ -234,7 +220,7 @@ class AsyncDispatcher {
         Google.setProxy(config.googleApiProxy);
     }
 
-    if (false) {
+    if (true) {
         Google.setHeaders(config.googleApiHeaders);
         Google.setApiKey(config.googleApiKey);
 
@@ -351,7 +337,7 @@ class AsyncDispatcher {
                 : addHours(new Date(startTime), 1).toISOString());
 
         const exist = view.find((x): boolean => {
-            if (x.body.content.includes(video.id)) {
+            if (stripHtml(x.body.content).includes(video.id)) {
                 return true;
             }
 
@@ -404,7 +390,7 @@ class AsyncDispatcher {
             if (event.subject === exist.subject &&
                 new Date(event.start!.dateTime).getTime() === new Date(exist.start.dateTime + 'Z').getTime() &&
                 new Date(event.end!.dateTime).getTime() === new Date(exist.end.dateTime + 'Z').getTime() &&
-                event.body!.content.trim() === exist.bodyPreview.trim()) {
+                event.body!.content.trim() === stripHtml(exist.body.content)) {
                 continue;
             }
 

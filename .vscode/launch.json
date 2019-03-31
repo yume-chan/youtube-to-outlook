@@ -5,7 +5,7 @@
     "version": "0.2.0",
     "configurations": [
         {
-            "name": "Current TS File",
+            "name": "Launch",
             "type": "node",
             "request": "launch",
             "args": [
