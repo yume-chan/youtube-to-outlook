@@ -10,3 +10,9 @@ export function stripHtml(text: string): string {
         .replace(/\r\n/g, '')
         .trim();
 }
+
+export interface EventBody {
+    original_title: string;
+    participants: string[];
+    references: string[];
+}

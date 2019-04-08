@@ -1,6 +1,9 @@
-import { request, globalAgent, Agent } from 'https';
+import { globalAgent, Agent } from 'https';
 import { URLSearchParams } from 'url';
 import HttpsProxyAgent from 'https-proxy-agent';
+import { OutgoingHttpHeaders } from 'http';
+import { AsyncDispatcher } from './async-dispatcher';
+import request, { isJsonRequestError } from './json-request';
 
 let accessToken: string;
 
@@ -10,66 +13,31 @@ export function setProxy(value: string) {
     agent = new HttpsProxyAgent(value);
 }
 
-function requestApi(method: string, path: string, params: object): Promise<any> {
-    return new Promise((resolve, reject) => {
-        let fullPath = `/v1.0${path}`;
-        if (method === 'GET') {
-            fullPath += `?${new URLSearchParams(params as any)}`;
-        }
+async function requestApi(
+    dispatcher: AsyncDispatcher,
+    method: string,
+    path: string,
+    params: object
+): Promise<any> {
+    let headers: OutgoingHttpHeaders = {
+        Authorization: `Bearer ${accessToken}`,
+    };
 
-        let headers: any = {
-            Authorization: `Bearer ${accessToken}`,
-        };
-        if (method !== 'GET') {
-            headers['Content-Type'] = 'application/json';
-        }
-
-        const req = request({
-            method,
+    try {
+        return await request(method, dispatcher, {
             host: 'graph.microsoft.com',
-            path: fullPath,
-            headers: headers,
-            timeout: 60000,
+            path: `/v1.0${path}`,
+            headers,
             agent,
-        }, (response) => {
-            console.log(response.statusCode, response.statusMessage, fullPath);
+            timeout: 30000,
+        }, params);
+    } catch (err) {
+        if (isJsonRequestError<any>(err)) {
+            err.message = err.body.error.message;
+        }
 
-            response.setEncoding('utf8');
-
-            const responseBody: string[] = [];
-
-            response.on('data', (chunk: string) => {
-                responseBody.push(chunk);
-            });
-
-            response.on('end', () => {
-                try {
-                    let result;
-
-                    if (responseBody.length !== 0) {
-                        result = JSON.parse(responseBody.join(''));
-                    }
-
-                    if (response.statusCode! < 200 ||
-                        response.statusCode! >= 300) {
-                        const message = result.error.message;
-                        const error = new Error(message);
-                        (error as any).response = result;
-                        reject(error);
-                        return;
-                    }
-
-                    resolve(result);
-                } catch (e) {
-                    requestApi(method, path, params).then(resolve, reject);
-                }
-            });
-        }).on('timeout', () => {
-            req.abort();
-        });
-
-        req.end(method !== 'GET' ? JSON.stringify(params) : undefined);
-    });
+        throw err;
+    }
 }
 
 export function setAccessToken(value: string): void {
@@ -85,8 +53,8 @@ export interface Response<T> {
     value: T;
 }
 
-export function listCalendars(): Promise<Response<Calendar[]>> {
-    return requestApi('GET', '/me/calendars', {});
+export function listCalendars(dispathcer: AsyncDispatcher): Promise<Response<Calendar[]>> {
+    return requestApi(dispathcer, 'GET', '/me/calendars', {});
 }
 
 interface ItemBody {
@@ -106,21 +74,29 @@ export interface Event {
     end: DateTimeTimeZone;
     reminderMinutesBeforeStart: number;
     start: DateTimeTimeZone;
+    recurrence: null;
     subject: string;
+    type: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster';
 }
 
-export async function getCalendarView(id: string, startDateTime: Date, endDateTime: Date): Promise<Event[]> {
-    const result = await requestApi('GET', `/me/calendars/${id}/calendarView`, {
+export async function getCalendarView(
+    dispathcer: AsyncDispatcher,
+    id: string,
+    startDateTime: Date,
+    endDateTime: Date
+): Promise<Event[]> {
+    const result = await requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
         startDateTime: startDateTime.toISOString(),
         endDateTime: endDateTime.toISOString(),
         $count: true,
         $top: 0,
     });
 
-    const count = result['@odata.count'];
+    const count: number = result['@odata.count'];
     const tasks: Promise<Response<Event[]>>[] = [];
+
     for (let i = 0; i < count; i += 500) {
-        tasks.push(requestApi('GET', `/me/calendars/${id}/calendarView`, {
+        tasks.push(requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
             startDateTime: startDateTime.toISOString(),
             endDateTime: endDateTime.toISOString(),
             $count: true,
@@ -128,20 +104,21 @@ export async function getCalendarView(id: string, startDateTime: Date, endDateTi
             $skip: i,
         }));
     }
+
     const results = await Promise.all(tasks);
 
     // keep order
     return results.reduce<Event[]>((list, result) => list.concat(result.value), []);
 }
 
-export function createEvent(id: string, event: Partial<Event>): Promise<Event> {
-    return requestApi('POST', `/me/calendars/${id}/events`, event);
+export function createEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<Event>): Promise<Event> {
+    return requestApi(dispathcer, 'POST', `/me/calendars/${id}/events`, event);
 }
 
-export function updateEvent(id: string, event: Partial<Event>): Promise<Event> {
-    return requestApi('PATCH', `/me/events/${id}`, event);
+export function updateEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<Event>): Promise<Event> {
+    return requestApi(dispathcer, 'PATCH', `/me/events/${id}`, event);
 }
 
-export function deleteEvent(id: string): Promise<void> {
-    return requestApi('DELETE', `/me/events/${id}`, {});
+export function deleteEvent(dispathcer: AsyncDispatcher, id: string): Promise<void> {
+    return requestApi(dispathcer, 'DELETE', `/me/events/${id}`, {});
 }

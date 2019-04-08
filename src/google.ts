@@ -1,7 +1,8 @@
-import { request, globalAgent, Agent } from 'https';
-import { URLSearchParams } from 'url';
+import { globalAgent, Agent } from 'https';
 import HttpsProxyAgent from 'https-proxy-agent';
 import { randomBytes } from 'crypto';
+import { AsyncDispatcher, delay } from './async-dispatcher';
+import request, { isJsonRequestError } from './json-request';
 
 export namespace Google {
     let key: string;
@@ -35,7 +36,7 @@ export namespace Google {
 
     type Api<T> = {
         [K in keyof T]: (T[K] extends ApiDefinition<infer Params, infer Response>
-            ? (params: Params) => Promise<Response>
+            ? (dispathcer: AsyncDispatcher, params: Params) => Promise<Response>
             : Api<T[K]>);
     }
 
@@ -43,97 +44,64 @@ export namespace Google {
         [api: string]: ApiDefinition<any, any> | ApiDefinitions;
     }
 
+    interface Response {
+        error: {
+            errors: {
+                reason: string,
+            }[],
+        },
+    }
+
     const host = 'content.googleapis.com';
 
-    function requestApi(path: string, params: object): Promise<any> {
-        return new Promise((resolve, reject) => {
-            const normalized: any = {};
-            for (const [key, value] of Object.entries(params)) {
-                switch (typeof value) {
-                    case 'undefined':
+    async function requestApi(path: string, dispatcher: AsyncDispatcher, params: object): Promise<any> {
+        const normalized: any = {
+            key: key,
+            quotaUser: randomBytes(20).toString('hex'),
+        };
+
+        for (const [key, value] of Object.entries(params)) {
+            switch (typeof value) {
+                case 'undefined':
+                    break;
+                case 'object':
+                    if (value === null) {
                         break;
-                    case 'object':
-                        if (value === null) {
-                            break;
-                        }
+                    }
 
-                        if (Array.isArray(value)) {
-                            normalized[key] = value.join(',');
-                            break;
-                        }
+                    if (Array.isArray(value)) {
+                        normalized[key] = value.join(',');
+                        break;
+                    }
 
-                        throw new Error('incorrect params ' + key);
-                    case 'function':
-                        throw new Error('incorrect params ' + key);
-                    default:
-                        normalized[key] = value.toString();
-                }
+                    throw new Error('incorrect params ' + key);
+                case 'function':
+                    throw new Error('incorrect params ' + key);
+                default:
+                    normalized[key] = value.toString();
+            }
+        }
+
+        try {
+            const result = await request<any>('GET', dispatcher, {
+                host,
+                path,
+                headers,
+                agent,
+                timeout: 10000,
+            }, normalized);
+
+            return result;
+        }
+        catch (err) {
+            if (isJsonRequestError<Response>(err) &&
+                err.body.error.errors.find(x => x.reason === 'quotaExceeded')) {
+                await delay(2000);
+                return await requestApi(path, dispatcher, params);
             }
 
-            const search = new URLSearchParams({
-                key: key,
-                quotaUser: randomBytes(20).toString('hex'),
-                ...normalized,
-            });
-
-            const fullPath = `${path}?${search.toString()}`;
-
-            const timeout = setTimeout(() => {
-                req.abort();
-            }, 10000);
-
-            const req = request({
-                hostname: host,
-                path: fullPath,
-                headers,
-                agent: agent,
-            }, (response) => {
-                console.log(response.statusCode, response.statusMessage, fullPath);
-
-                response.setEncoding('utf8');
-
-                const responseBody: string[] = [];
-
-                response.on('data', (chunk: string) => {
-                    responseBody.push(chunk);
-                });
-
-                response.on('error', (e) => {
-                    clearTimeout(timeout)
-                    reject(e);
-                })
-
-                response.on('end', () => {
-                    clearTimeout(timeout);
-                    try {
-                        const result = JSON.parse(responseBody.join(''));
-
-                        if (response.statusCode !== 200) {
-                            if (result.error.errors.find((x: any) => x.reason === 'quotaExceeded')) {
-                                setTimeout(() => {
-                                    requestApi(path, params).then(resolve, reject);
-                                }, 1000);
-                                return;
-                            }
-
-                            const message = result.error.message;
-                            const error = new Error(message);
-                            (error as any).response = result;
-                            reject(error);
-                            return;
-                        }
-
-                        resolve(result);
-                    } catch (e) {
-                        reject(e);
-                    }
-                });
-            }).on('error', (e) => {
-                reject(e);
-            });
-
-            req.end();
-        });
+            throw err;
+        }
     }
 
     function createApi<T extends ApiDefinitions>(definitions: T, base: string): Api<T> {

@@ -4,7 +4,8 @@ import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
 import config from '../config';
-import { stripHtml } from './util';
+import { stripHtml, EventBody } from './util';
+import { AsyncDispatcher } from './async-dispatcher';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
@@ -102,7 +103,7 @@ async function searchAll(dispatcher: AsyncDispatcher, params: Google.YouTubeDefi
     let list: string[] = [];
 
     while (true) {
-        const result = await retry(() => dispatcher.run(() => Google.YouTube.search(params)));
+        const result = await retry(() => Google.YouTube.search(dispatcher, params));
         list = list.concat(result.items.map(x => x.id.videoId));
 
         if (!result.nextPageToken) {
@@ -134,63 +135,13 @@ function filterTitle(original: string) {
         .trim()
 }
 
-class AsyncSemaphore {
-    private _queue: Array<() => void> = [];
-
-    public wait(): Promise<void> {
-        const promise = new Promise<void>(resolve => {
-            this._queue.push(resolve);
-        });
-        return promise;
-    }
-
-    public notify() {
-        if (this._queue.length === 0) {
-            return;
-        }
-
-        this._queue.shift()!();
-    }
-}
-
-class AsyncDispatcher {
-    private _concurrency: number;
-
-    public get concurrency(): number { return this._concurrency; }
-
-    private _running: number = 0;
-
-    private _semaphore: AsyncSemaphore = new AsyncSemaphore();
-
-    constructor(concurrency: number = 10) {
-        this._concurrency = concurrency;
-    }
-
-    public async run<T, U extends any[]>(task: (...args: U) => Promise<T>, ...args: U): Promise<T> {
-        if (this._running === this._concurrency) {
-            await this._semaphore.wait();
-        }
-
-        this._running++;
-        try {
-            return await task(...args);
-        } finally {
-            this._running--;
-            this._semaphore.notify();
-        }
-    }
-
-    public async all<T>(tasks: Array<() => Promise<T>>): Promise<T[]> {
-        return Promise.all(tasks.map(item => this.run(item)));
-    }
-
-    public async map<T, U>(values: T[], task: (item: T) => Promise<U>): Promise<U[]> {
-        return Promise.all(values.map(item => this.run(task, item)));
-    }
-}
-
 (async () => {
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
+
+    let tasks: Promise<any>[];
+    setInterval(() => {
+        console.log(dispatcher.activeRequests.map(x => `${dispatcher.requestStatus.get(x)} ${x.path}`).join('\n'));
+    }, 10000);
 
     let details: Google.YouTubeDefinitions.VideoResponse[] = [];
 
@@ -207,7 +158,7 @@ class AsyncDispatcher {
         for (const item of details) {
             const publishedAt = new Date(item.snippet.publishedAt);
             if (publishedAfter[item.snippet.channelId] < publishedAt) {
-                publishedAfter[item.snippet.channelId] = publishedAt;
+                // publishedAfter[item.snippet.channelId] = publishedAt;
             }
 
             idSet.add(item.id);
@@ -220,44 +171,46 @@ class AsyncDispatcher {
         Google.setProxy(config.googleApiProxy);
     }
 
-    if (true) {
+    if (false) {
         Google.setHeaders(config.googleApiHeaders);
         Google.setApiKey(config.googleApiKey);
 
-        await Promise.all(config.youtubeChannels.map(channel => {
-            return Promise.all((['completed', 'live', 'upcoming'] as const).map(async eventType => {
-                const result = await searchAll(dispatcher, {
-                    part: ['id'],
-                    channelId: channel.id,
-                    type: 'video',
-                    eventType,
-                    order: "date",
-                    publishedAfter: publishedAfter[channel.id].toISOString(),
-                    maxResults: 50,
-                });
+        tasks = config.youtubeChannels.reduce((result, channel) => {
+            return result.concat(
+                (['completed', 'live', 'upcoming'] as const).map(async eventType => {
+                    const result = await searchAll(dispatcher, {
+                        part: ['id'],
+                        channelId: channel.id,
+                        type: 'video',
+                        eventType,
+                        order: "date",
+                        publishedAfter: publishedAfter[channel.id].toISOString(),
+                        maxResults: 50,
+                    });
 
-                for (const item of result) {
-                    idSet.add(item);
-                }
-            }));
-        }));
+                    for (const item of result) {
+                        idSet.add(item);
+                    }
+                }));
+        }, [] as Promise<void>[]);
+
+        await Promise.all(tasks);
 
         console.log(`${idSet.size} known ids after searching`);
 
         details = [];
-        const tasks: Promise<void>[] = [];
 
         const ids = Array.from(idSet);
         const slice = Math.ceil(ids.length / 50);
         for (let i = 0; i < slice; i++) {
-            tasks.push(retry(() => dispatcher.run(async () => {
-                const result = await Google.YouTube.videos({
+            tasks.push(retry(async () => {
+                const result = await Google.YouTube.videos(dispatcher, {
                     part: ['snippet', 'liveStreamingDetails'],
                     id: ids.slice(i * 50, (i + 1) * 50),
                 });
 
                 details = details.concat(result.items);
-            })));
+            }));
         }
 
         await Promise.all(tasks);
@@ -292,7 +245,7 @@ class AsyncDispatcher {
     }
     MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
 
-    const calendars = await MicrosoftGraph.listCalendars();
+    const calendars = await MicrosoftGraph.listCalendars(dispatcher);
     const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);
 
     if (typeof calendar === 'undefined') {
@@ -302,23 +255,43 @@ class AsyncDispatcher {
     const viewStartTime = addDays(new Date(viewStart), -1);
     const viewEndTime = addDays(new Date(viewEnd), 1);
 
-    let view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
+    let view = await MicrosoftGraph.getCalendarView(dispatcher, calendar.id, viewStartTime, viewEndTime);
 
-    const tasks: Promise<unknown>[] = [];
+    tasks = [];
+    // let toProcess = view.slice();
+    // while (toProcess.length !== 0) {
+    //     const item = toProcess[0];
+    //     toProcess = toProcess.slice(1);
 
-    let toProcess = view.slice();
-    while (toProcess.length !== 0) {
-        const item = toProcess[0];
-        toProcess = toProcess.slice(1);
+    //     const duplicates = view.filter(x => x !== item && x.subject === item.subject && x.start.dateTime === item.start.dateTime);
+    //     toProcess = toProcess.filter(x => !duplicates.includes(x));
+    //     view = view.filter(x => !duplicates.includes(x));
 
-        const duplicates = view.filter(x => x !== item && x.subject === item.subject && x.start.dateTime === item.start.dateTime);
-        toProcess = toProcess.filter(x => !duplicates.includes(x));
-        view = view.filter(x => !duplicates.includes(x));
+    //     for (const duplicate of duplicates) {
+    //         console.log('deleting', duplicate.subject);
+    //         tasks.push(dispatcher.run(() => MicrosoftGraph.deleteEvent(duplicate.id)));
+    //     }
+    // }
 
-        for (const duplicate of duplicates) {
-            console.log('deleting', duplicate.subject);
-            tasks.push(dispatcher.run(() => MicrosoftGraph.deleteEvent(duplicate.id)));
+    const eventsById: Map<string, MicrosoftGraph.Event> = new Map();
+    const eventsByName: Map<string, MicrosoftGraph.Event[]> = new Map();
+    for (const event of view) {
+        event.body.content = stripHtml(event.body.content);
+        const body = Yaml.parse<EventBody>(event.body.content);
+        if (Array.isArray(body.references)) {
+            const url = body.references.find(x => x.includes('youtube.com'));
+            if (url) {
+                const parts = url.split('=');
+                const id = parts[parts.length - 1];
+                eventsById.set(id, event);
+            }
         }
+
+        const name = event.subject.split('-').map(x => x.trim())[0];
+        if (!eventsByName.has(name)) {
+            eventsByName.set(name, []);
+        }
+        eventsByName.get(name)!.push(event);
     }
 
     for (const video of details) {
@@ -329,6 +302,7 @@ class AsyncDispatcher {
 
         const startTime = video.liveStreamingDetails.actualStartTime ||
             video.liveStreamingDetails.scheduledStartTime;
+        const startTimeValue = new Date(startTime).getTime();
 
         const endTime = video.liveStreamingDetails.actualEndTime ||
             video.liveStreamingDetails.scheduledEndTime ||
@@ -336,19 +310,15 @@ class AsyncDispatcher {
                 ? new Date().toISOString()
                 : addHours(new Date(startTime), 1).toISOString());
 
-        const exist = view.find((x): boolean => {
-            if (stripHtml(x.body.content).includes(video.id)) {
-                return true;
-            }
-
-            const xStartTime = new Date(x.start.dateTime + 'Z').getTime();
-            if (x.subject.startsWith(channelName) &&
-                Math.abs(xStartTime - new Date(startTime).getTime()) < 10 * 60 * 1000) {
-                return true;
-            }
-
-            return false;
-        });
+        let exist: MicrosoftGraph.Event | undefined;
+        if (eventsById.has(video.id)) {
+            exist = eventsById.get(video.id);
+        } else if (eventsByName.has(channelName)) {
+            exist = eventsByName.get(channelName)!.find(event => {
+                const eventStartTime = new Date(event.start.dateTime + 'Z').getTime();
+                return Math.abs(eventStartTime - startTimeValue) < 15 * 60 * 1000;
+            });
+        }
 
         const event: Partial<MicrosoftGraph.Event> = {
             subject: `${channelName} - ${filtered}`,
@@ -367,12 +337,13 @@ class AsyncDispatcher {
                 }),
                 contentType: 'text',
             },
+            recurrence: null,
             reminderMinutesBeforeStart: 5,
         };
 
         if (!exist) {
             console.log('creating ', event.subject);
-            tasks.push(retry(() => dispatcher.run(() => MicrosoftGraph.createEvent(calendar.id, event))));
+            tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
         } else {
             const data: any = Yaml.parse(exist.bodyPreview);
             if (data && data.title) {
@@ -394,10 +365,17 @@ class AsyncDispatcher {
                 continue;
             }
 
-            console.log('updating ', event.subject);
-            tasks.push(retry(() => dispatcher.run(() => MicrosoftGraph.updateEvent(exist.id, event))));
+            if (exist.type === 'occurrence' || exist.type === 'exception') {
+                tasks.push(retry(() => MicrosoftGraph.deleteEvent(dispatcher, exist!.id)));
+                tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
+            } else {
+                console.log('updating ', event.subject);
+                tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, exist!.id, event)));
+            }
         }
     }
 
     await Promise.all(tasks);
+
+    console.log('done');
 })();

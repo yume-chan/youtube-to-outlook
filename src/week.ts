@@ -2,28 +2,25 @@ import { readFileSync, writeFileSync } from 'fs';
 
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
-import { stripHtml } from './util';
+import { stripHtml, EventBody } from './util';
 
 import config from '../config';
+import { AsyncDispatcher } from './async-dispatcher';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
-interface EventBody {
-    original_title: string;
-    participants: string[];
-    references: string[];
-}
-
 (async () => {
+    const dispatcher = new AsyncDispatcher();
+
     MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
 
-    const calendars = await MicrosoftGraph.listCalendars();
+    const calendars = await MicrosoftGraph.listCalendars(dispatcher);
     const calendar = calendars.value.find(x => x.name === config.outlookCalendarName)!;
 
-    const viewStartTime = new Date('2019-03-25T00:00:00+08:00');
-    const viewEndTime = new Date('2019-03-31T00:00:00+08:00');
+    const viewStartTime = new Date('2019-04-01T00:00:00+08:00');
+    const viewEndTime = new Date('2019-04-08T00:00:00+08:00');
 
-    const view = await MicrosoftGraph.getCalendarView(calendar.id, viewStartTime, viewEndTime);
+    const view = await MicrosoftGraph.getCalendarView(dispatcher, calendar.id, viewStartTime, viewEndTime);
 
     let list: { time: string; name: string; title: string, url?: string }[] = [];
 
@@ -35,5 +32,4 @@ interface EventBody {
     });
 
     writeFileSync('week.csv', list.map(x => `${x.time},${x.name},${x.title || ''},${x.url || ''}`).join('\r\n'), 'utf8');
-
 })();
