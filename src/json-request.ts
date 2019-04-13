@@ -12,10 +12,21 @@ export function isJsonRequestError<T>(value: unknown): value is JsonRequestError
     return typeof error === 'number' && typeof error !== 'undefined';
 }
 
-async function request<T>(dispatcher: AsyncDispatcher, options: HttpsRequestOptions): Promise<T> {
+async function request<T>(dispatcher: AsyncDispatcher, options: HttpsRequestOptions): Promise<T | undefined> {
     try {
         const response = await dispatcher.request(options);
-        return JSON.parse(response.toString('utf8')) as T;
+        const responseText = response.toString('utf8');
+        if (responseText === '') {
+            return undefined;
+        }
+
+        try {
+            return JSON.parse(responseText) as T;
+        } catch (err) {
+            console.log('error: ' + options.path);
+            console.log(responseText);
+            throw err;
+        }
     } catch (err) {
         if (isHttpsRequestError(err)) {
             const json = JSON.parse(err.body!.toString('utf8'));
@@ -31,7 +42,7 @@ function noBody<T>(
     dispatcher: AsyncDispatcher,
     options: HttpsRequestOptions,
     params: { [key: string]: string }
-): Promise<T> {
+): Promise<T | undefined> {
     options = {
         ...options,
         method,
@@ -46,7 +57,7 @@ function hasBody<T>(
     dispatcher: AsyncDispatcher,
     options: HttpsRequestOptions,
     params: object
-): Promise<T> {
+): Promise<T | undefined> {
     options = {
         ...options,
         method,
@@ -65,13 +76,14 @@ export default <T>(
     dispatcher: AsyncDispatcher,
     options: HttpsRequestOptions,
     params: any
-): Promise<T> => {
+): Promise<T | undefined> => {
     switch (method) {
         case 'GET':
             return noBody(method, dispatcher, options, params);
         case 'POST':
         case 'PUT':
         case 'PATCH':
+        case 'DELETE':
             return hasBody(method, dispatcher, options, params);
         default:
             throw new Error(`unknown value for argument \`method\`, got ${method}`);

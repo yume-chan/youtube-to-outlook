@@ -29,7 +29,7 @@ async function requestApi(
             path: `/v1.0${path}`,
             headers,
             agent,
-            timeout: 30000,
+            timeout: 60000,
         }, params);
     } catch (err) {
         if (isJsonRequestError<any>(err)) {
@@ -79,36 +79,56 @@ export interface Event {
     type: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster';
 }
 
+async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
+    let i = 0;
+    while (true) {
+        try {
+            return await body();
+        } catch (e) {
+            i++;
+            if (i === max) {
+                throw e;
+            }
+        }
+    }
+}
+
 export async function getCalendarView(
     dispathcer: AsyncDispatcher,
     id: string,
     startDateTime: Date,
     endDateTime: Date
 ): Promise<Event[]> {
-    const result = await requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
+    const data = await requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
         startDateTime: startDateTime.toISOString(),
         endDateTime: endDateTime.toISOString(),
         $count: true,
         $top: 0,
     });
 
-    const count: number = result['@odata.count'];
-    const tasks: Promise<Response<Event[]>>[] = [];
+    const count: number = data['@odata.count'];
+    // const tasks: Promise<Response<Event[]>>[] = [];
+    const pageSize: number = 1000;
 
-    for (let i = 0; i < count; i += 500) {
-        tasks.push(requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
+    let result: Event[] = [];
+    for (let i = 0; i < count; i += pageSize) {
+        const page = await retry(() => requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
             startDateTime: startDateTime.toISOString(),
             endDateTime: endDateTime.toISOString(),
             $count: true,
-            $top: 500,
+            $top: pageSize,
             $skip: i,
-        }));
+        })) as Response<Event[]>;
+
+        result = result.concat(page.value);
     }
 
-    const results = await Promise.all(tasks);
+    // const results = await Promise.all(tasks);
 
-    // keep order
-    return results.reduce<Event[]>((list, result) => list.concat(result.value), []);
+    // // keep order
+    // return results.reduce<Event[]>((list, result) => list.concat(result.value), []);
+
+    return result;
 }
 
 export function createEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<Event>): Promise<Event> {

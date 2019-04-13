@@ -70,7 +70,10 @@ export class AsyncDispatcher {
             return await task(...args);
         } finally {
             this._running--;
-            this._semaphore.notify();
+
+            for (let i = this._running; i < this._concurrency; i++) {
+                this._semaphore.notify();
+            }
         }
     }
 

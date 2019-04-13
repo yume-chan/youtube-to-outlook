@@ -1,4 +1,4 @@
-﻿import { readFileSync, writeFileSync, existsSync } from 'fs';
+import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
@@ -137,13 +137,12 @@ function filterTitle(original: string) {
 
 (async () => {
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
+    // setInterval(() => {
+    //     console.log(dispatcher.activeRequests.map(x => `${dispatcher.requestStatus.get(x)} ${x.path}`).join('\n'));
+    // }, 10000);
 
     let tasks: Promise<any>[];
-    setInterval(() => {
-        console.log(dispatcher.activeRequests.map(x => `${dispatcher.requestStatus.get(x)} ${x.path}`).join('\n'));
-    }, 10000);
-
-    let details: Google.YouTubeDefinitions.VideoResponse[] = [];
+    const videos: Map<string, Google.YouTubeDefinitions.VideoResponse> = new Map();
 
     let publishedAfter: { [id: string]: Date } = {};
     for (const item of config.youtubeChannels) {
@@ -153,14 +152,15 @@ function filterTitle(original: string) {
     const idSet: Set<string> = new Set();
 
     if (existsSync('youtube.json')) {
-        details = JSON.parse(readFileSync('youtube.json', 'utf-8'));
+        const list = JSON.parse(readFileSync('youtube.json', 'utf-8'));
 
-        for (const item of details) {
+        for (const item of list) {
             const publishedAt = new Date(item.snippet.publishedAt);
             if (publishedAfter[item.snippet.channelId] < publishedAt) {
                 // publishedAfter[item.snippet.channelId] = publishedAt;
             }
 
+            videos.set(item.id, item);
             idSet.add(item.id);
         }
 
@@ -170,6 +170,10 @@ function filterTitle(original: string) {
     if (typeof config.googleApiProxy === 'string') {
         Google.setProxy(config.googleApiProxy);
     }
+
+    let viewStart = Infinity;
+    let viewEnd = 0;
+    const videoToUpdate: Google.YouTubeDefinitions.VideoResponse[] = [];
 
     if (false) {
         Google.setHeaders(config.googleApiHeaders);
@@ -198,8 +202,6 @@ function filterTitle(original: string) {
 
         console.log(`${idSet.size} known ids after searching`);
 
-        details = [];
-
         const ids = Array.from(idSet);
         const slice = Math.ceil(ids.length / 50);
         for (let i = 0; i < slice; i++) {
@@ -209,35 +211,67 @@ function filterTitle(original: string) {
                     id: ids.slice(i * 50, (i + 1) * 50),
                 });
 
-                details = details.concat(result.items);
+                for (const video of result.items) {
+                    if (typeof video.liveStreamingDetails !== 'object') {
+                        console.warn("WTF it's not a live stream? " + video.id);
+                        continue;
+                    }
+
+                    if (videos.has(video.id)) {
+                        if (videos.get(video.id)!.etag === video.etag) {
+                            continue;
+                        }
+                    }
+
+                    videoToUpdate.push(video);
+
+                    const eventTime = new Date(
+                        video.liveStreamingDetails.actualStartTime ||
+                        video.liveStreamingDetails.scheduledStartTime)
+                        .getTime();
+
+                    if (eventTime < viewStart) {
+                        viewStart = eventTime;
+                    }
+
+                    if (eventTime > viewEnd) {
+                        viewEnd = eventTime;
+                    }
+
+                    videos.set(video.id, video);
+                }
             }));
         }
 
         await Promise.all(tasks);
 
-        writeFileSync('youtube.json', JSON.stringify(details, undefined, 4));
+        writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
+    } else {
+        for (const video of videos.values()) {
+            if (typeof video.liveStreamingDetails !== 'object') {
+                console.warn("WTF it's not a live stream? " + video.id);
+                continue;
+            }
+
+            const eventTime = new Date(
+                video.liveStreamingDetails.actualStartTime ||
+                video.liveStreamingDetails.scheduledStartTime)
+                .getTime();
+
+            if (eventTime < viewStart) {
+                viewStart = eventTime;
+            }
+
+            if (eventTime > viewEnd) {
+                viewEnd = eventTime;
+            }
+
+            videoToUpdate.push(video);
+        }
     }
 
-    if (details.length === 0) {
+    if (videos.size === 0) {
         return;
-    }
-
-    let viewStart = Infinity;
-    let viewEnd = 0;
-
-    for (const video of details) {
-        const eventTime = new Date(
-            video.liveStreamingDetails.actualStartTime ||
-            video.liveStreamingDetails.scheduledStartTime)
-            .getTime();
-
-        if (eventTime < viewStart) {
-            viewStart = eventTime;
-        }
-
-        if (eventTime > viewEnd) {
-            viewEnd = eventTime;
-        }
     }
 
     if (typeof config.microsoftApiProxy === 'string') {
@@ -256,22 +290,24 @@ function filterTitle(original: string) {
     const viewEndTime = addDays(new Date(viewEnd), 1);
 
     let view = await MicrosoftGraph.getCalendarView(dispatcher, calendar.id, viewStartTime, viewEndTime);
+    console.log(`got calendar view with ${view.length} events`);
 
     tasks = [];
-    // let toProcess = view.slice();
-    // while (toProcess.length !== 0) {
-    //     const item = toProcess[0];
-    //     toProcess = toProcess.slice(1);
 
-    //     const duplicates = view.filter(x => x !== item && x.subject === item.subject && x.start.dateTime === item.start.dateTime);
-    //     toProcess = toProcess.filter(x => !duplicates.includes(x));
-    //     view = view.filter(x => !duplicates.includes(x));
+    let toProcess = view.slice();
+    while (toProcess.length !== 0) {
+        const item = toProcess[0];
+        toProcess = toProcess.slice(1);
 
-    //     for (const duplicate of duplicates) {
-    //         console.log('deleting', duplicate.subject);
-    //         tasks.push(dispatcher.run(() => MicrosoftGraph.deleteEvent(duplicate.id)));
-    //     }
-    // }
+        const duplicates = view.filter(x => x !== item && x.subject === item.subject && x.start.dateTime === item.start.dateTime);
+        toProcess = toProcess.filter(x => !duplicates.includes(x));
+        view = view.filter(x => !duplicates.includes(x));
+
+        for (const duplicate of duplicates) {
+            console.log('deleting', duplicate.subject);
+            tasks.push(retry(() => MicrosoftGraph.deleteEvent(dispatcher, duplicate.id)));
+        }
+    }
 
     const eventsById: Map<string, MicrosoftGraph.Event> = new Map();
     const eventsByName: Map<string, MicrosoftGraph.Event[]> = new Map();
@@ -294,7 +330,7 @@ function filterTitle(original: string) {
         eventsByName.get(name)!.push(event);
     }
 
-    for (const video of details) {
+    for (const video of videoToUpdate) {
         const channelName = config.youtubeChannels.find(x => x.id === video.snippet.channelId)!.nickname;
 
         const title = video.snippet.title;

@@ -138,6 +138,7 @@ export namespace Google {
 
         export interface VideoResponse {
             id: string;
+            etag: string;
 
             snippet: {
                 publishedAt: string;
