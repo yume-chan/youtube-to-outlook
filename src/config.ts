@@ -25,6 +25,10 @@ export default interface Config {
         nickname: string;
     }[];
 
+    extraVideoIds?: string[];
+
+    ignoreVideoIds?: string[];
+
     /**
      * The calendar name you want the events to go.
      * Your Microsoft Account must have write access.

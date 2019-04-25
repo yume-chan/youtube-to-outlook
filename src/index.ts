@@ -114,7 +114,7 @@ async function searchAll(dispatcher: AsyncDispatcher, params: Google.YouTubeDefi
     }
 }
 
-async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
+async function retry<T>(body: () => Promise<T>, max: number = Infinity): Promise<T> {
     let i = 0;
     while (true) {
         try {
@@ -122,6 +122,8 @@ async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
         } catch (e) {
             i++;
             if (i === max) {
+                console.error(`retry failed ${max} times with last error:`);
+                console.error(e);
                 throw e;
             }
         }
@@ -151,6 +153,12 @@ function filterTitle(original: string) {
 
     const idSet: Set<string> = new Set();
 
+    if (Array.isArray(config.extraVideoIds)) {
+        for (const id of config.extraVideoIds) {
+            idSet.add(id);
+        }
+    }
+
     if (existsSync('youtube.json')) {
         const list = JSON.parse(readFileSync('youtube.json', 'utf-8'));
 
@@ -175,7 +183,7 @@ function filterTitle(original: string) {
     let viewEnd = 0;
     const videoToUpdate: Google.YouTubeDefinitions.VideoResponse[] = [];
 
-    if (false) {
+    if (true) {
         Google.setHeaders(config.googleApiHeaders);
         Google.setApiKey(config.googleApiKey);
 
@@ -203,12 +211,12 @@ function filterTitle(original: string) {
         console.log(`${idSet.size} known ids after searching`);
 
         const ids = Array.from(idSet);
-        const slice = Math.ceil(ids.length / 50);
-        for (let i = 0; i < slice; i++) {
+        const pageSize = 25;
+        for (let i = 0; i < ids.length; i += pageSize) {
             tasks.push(retry(async () => {
                 const result = await Google.YouTube.videos(dispatcher, {
                     part: ['snippet', 'liveStreamingDetails'],
-                    id: ids.slice(i * 50, (i + 1) * 50),
+                    id: ids.slice(i, i + pageSize),
                 });
 
                 for (const video of result.items) {
@@ -218,7 +226,13 @@ function filterTitle(original: string) {
                     }
 
                     if (videos.has(video.id)) {
-                        if (videos.get(video.id)!.etag === video.etag) {
+                        const old = { ...videos.get(video.id)! };
+                        delete old.etag;
+                        delete video.etag;
+
+                        // etag can be different even if other fields are the same.
+                        // doing a deep equality test without etag field.
+                        if (JSON.stringify(old) === JSON.stringify(video)) {
                             continue;
                         }
                     }
@@ -270,7 +284,7 @@ function filterTitle(original: string) {
         }
     }
 
-    if (videos.size === 0) {
+    if (videoToUpdate.length === 0) {
         return;
     }
 
@@ -405,7 +419,7 @@ function filterTitle(original: string) {
                 tasks.push(retry(() => MicrosoftGraph.deleteEvent(dispatcher, exist!.id)));
                 tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
             } else {
-                console.log('updating ', event.subject);
+                console.log(`updating ${video.id} ${event.subject}`);
                 tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, exist!.id, event)));
             }
         }
