@@ -51,14 +51,9 @@ So use with your own judgement.
 
 In theroy we can record the last updated time any only search for new events after that.
 
-But sadly, all filters in `youtube.search.list` API are currently not functional
+~~~But sadly, all filters in `youtube.search.list` API are currently not functional~~~
 
-![](doc/issue_tracker.png)
-[source](https://issuetracker.google.com/issues?q=search%20componentid:186600)
-
-And Google says they did it for ["remove graphic, violative content from YouTube"](https://support.google.com/youtube/thread/2494861).
-
-I don't understand what's the relation between the two, but I know you have to request full data everytime so it blows up your quota even more quickly.
+It's fixed now, but searching with `publishedAfter` contrain won't return all results.
 
 ### Want unlimited YouTube Data API v3 Quota?
 
@@ -66,11 +61,17 @@ Luckily, I have found a way to abuse the API Key from Google API Explorer. It's 
 
 But I don't want to publish it here.
 
-You may still reach the so called "per user quota", changing your IP address will "fix" it.
+You may still reach the so called "per user quota", changing your IP address will "resolve" it.
 
 ### Step 2: get your Microsoft Graph Access Token
 
-To access your Outlook Calender, we need an access token for your Microsoft Account.
+#### Complex way
+
+We use [Microsoft Graph API](https://docs.microsoft.com/en-us/graph/api/overview?view=graph-rest-1.0) to access your Outlook Calender. To do that, we need an access token for your Microsoft Account.
+
+Microsoft Graph API requires an [Application ID](https://docs.microsoft.com/en-us/graph/auth-register-app-v2?toc=./ref/toc.json&view=graph-rest-1.0) to be registered first, but I have included one in the project.
+
+Because all Microsft Graph API are free and unlimited, I believe there is no risk to publish my Application ID here. Anyway, it can only be used to access Outlook Calendar.
 
 1. Run
 
@@ -96,6 +97,10 @@ To access your Outlook Calender, we need an access token for your Microsoft Acco
    PS2. To be more clear, put it besides the `index.html` file.
 
 7. You can close your browser and terminal as you wish.
+
+#### Easy way
+
+I have deployed the very same web site on my server, access https://chensi.moe/ms-auth, then start from step 3 above.
 
 ### Refresh your access token
 
