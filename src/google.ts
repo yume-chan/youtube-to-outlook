@@ -91,6 +91,10 @@ export namespace Google {
                 timeout: 10000,
             }, normalized);
 
+            if (typeof result === 'undefined') {
+                throw new Error('response is null');
+            }
+
             return result;
         }
         catch (err) {

@@ -1,4 +1,4 @@
-import { readFileSync, writeFileSync, existsSync } from 'fs';
+﻿import { readFileSync, writeFileSync, existsSync } from 'fs';
 
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
@@ -130,6 +130,54 @@ async function retry<T>(body: () => Promise<T>, max: number = Infinity): Promise
     }
 }
 
+export type PromiseResolverState = 'running' | 'resolved' | 'rejected';
+
+export class PromiseResolver<T>{
+    private _promise: Promise<T>;
+    public get promise(): Promise<T> { return this._promise; }
+
+    private _resolve!: (value?: T | PromiseLike<T>) => void;
+    private _reject!: (reason?: any) => void;
+
+    private _state: PromiseResolverState = 'running';
+    public get state(): PromiseResolverState { return this._state; }
+
+    public constructor() {
+        this._promise = new Promise<T>((resolve, reject) => {
+            this._resolve = resolve;
+            this._reject = reject;
+        });
+    }
+
+    public resolve(value?: T | PromiseLike<T>): void {
+        this._resolve(value);
+        this._state = 'resolved';
+    }
+
+    public reject(reason?: any): void {
+        this._reject(reason);
+        this._state = 'rejected';
+    }
+}
+
+function bail<T>(promises: Promise<T>[]): Promise<T[]> {
+    let completed = 0;
+    const results: T[] = [];
+    const resolver = new PromiseResolver<T[]>();
+    for (let i = 0; i < promises.length; i++) {
+        promises[i].then(result => {
+            results[i] = result;
+            completed++;
+            if (completed === promises.length) {
+                resolver.resolve(results);
+            }
+        }, error => {
+            resolver.reject(error);
+        });
+    }
+    return resolver.promise;
+}
+
 function filterTitle(original: string) {
     return original
         .replace(/【(.*?)】/g, '')
@@ -206,7 +254,7 @@ function filterTitle(original: string) {
                 }));
         }, [] as Promise<void>[]);
 
-        await Promise.all(tasks);
+        await bail(tasks);
 
         console.log(`${idSet.size} known ids after searching`);
 
@@ -257,7 +305,7 @@ function filterTitle(original: string) {
             }));
         }
 
-        await Promise.all(tasks);
+        await bail(tasks);
 
         writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
     } else {
@@ -425,7 +473,7 @@ function filterTitle(original: string) {
         }
     }
 
-    await Promise.all(tasks);
+    await bail(tasks);
 
     console.log('done');
 })();
