@@ -96,7 +96,7 @@ export class AsyncDispatcher {
                 });
 
                 outgoing.on('response', async (response: IncomingMessage) => {
-                    console.log(`${response.statusCode} ${response.statusMessage} ${options.path}`);
+                    // console.log(`${response.statusCode} ${response.statusMessage} ${options.path}`);
 
                     try {
                         const body: Buffer[] = [];

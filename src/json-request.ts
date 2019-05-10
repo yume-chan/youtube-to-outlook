@@ -1,5 +1,5 @@
 import { AsyncDispatcher, HttpsRequestOptions, isHttpsRequestError } from "./async-dispatcher";
-import { URLSearchParams } from "url";
+import { URLSearchParams, pathToFileURL } from "url";
 
 export interface JsonRequestError<T> extends Error {
     statusCode?: number;
@@ -23,8 +23,8 @@ async function request<T>(dispatcher: AsyncDispatcher, options: HttpsRequestOpti
         try {
             return JSON.parse(responseText) as T;
         } catch (err) {
-            console.log('error: ' + options.path);
-            console.log(responseText);
+            // console.log('error: ' + options.path);
+            // console.log(responseText);
             throw err;
         }
     } catch (err) {
@@ -41,12 +41,21 @@ function noBody<T>(
     method: string,
     dispatcher: AsyncDispatcher,
     options: HttpsRequestOptions,
-    params: { [key: string]: string }
+    params?: { [key: string]: string }
 ): Promise<T | undefined> {
+    if (params && Object.keys(params).length) {
+        if (options.path.includes('?')) {
+            options.path += '&'
+        } else {
+            options.path += '?';
+        }
+        options.path += new URLSearchParams(params).toString();
+    }
+
     options = {
         ...options,
         method,
-        path: `${options.path}?${new URLSearchParams(params || {}).toString()}`
+        path: options.path,
     };
 
     return request<T>(dispatcher, options);
@@ -75,7 +84,7 @@ export default <T>(
     method: string,
     dispatcher: AsyncDispatcher,
     options: HttpsRequestOptions,
-    params: any
+    params?: any
 ): Promise<T | undefined> => {
     switch (method) {
         case 'GET':

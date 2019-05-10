@@ -4,8 +4,9 @@ import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import * as Yaml from './yaml';
 import config from '../config';
-import { stripHtml, EventBody } from './util';
+import { stripHtml, EventBody, deepMerge } from './util';
 import { AsyncDispatcher } from './async-dispatcher';
+import { Calendar as CalendarView } from './calendar';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
@@ -23,80 +24,6 @@ function addHours(date: Date, value: number): Date {
 
 function addDays(date: Date, value: number): Date {
     return addHours(date, value * 24);
-}
-
-function detailType(value: any) {
-    switch (typeof value) {
-        case 'object':
-            if (value === null) {
-                return 'null';
-            }
-            if (Array.isArray(value)) {
-                return 'array';
-            }
-            return 'object';
-        default:
-            return typeof value;
-    }
-}
-
-function deepMerge(...args: any[]): any {
-    args = args.filter(x => typeof x !== 'undefined' && x !== null);
-
-    const keySet: Set<string> = new Set();
-    for (const arg of args) {
-        for (const key of Object.keys(arg)) {
-            keySet.add(key);
-        }
-    }
-
-    const keys = Array.from(keySet);
-    keys.sort();
-
-    const result: any = {};
-    for (const key of keys) {
-        let type: string | undefined;
-        for (const arg of args) {
-            const thisType = detailType(arg[key]);
-            if (thisType === 'undefined') {
-                if (Object.prototype.hasOwnProperty.call(arg, key)) {
-                    delete result[key];
-                }
-                continue;
-            }
-
-            if (type !== undefined) {
-                if (thisType !== type) {
-                    throw new TypeError();
-                }
-            }
-
-            type = thisType;
-            if (type === 'array') {
-                if (Array.isArray(result[key])) {
-                    const set = new Set();
-                    for (const item of result[key]) {
-                        set.add(item);
-                    }
-                    for (const item of arg[key]) {
-                        set.add(item);
-                    }
-                    const list = Array.from(set);
-                    list.sort();
-                    result[key] = list;
-                    continue;
-                }
-            }
-
-            if (type === 'object') {
-                result[key] = deepMerge(result[key], arg[key]);
-            }
-
-            result[key] = arg[key];
-        }
-    }
-
-    return result;
 }
 
 async function searchAll(dispatcher: AsyncDispatcher, params: Google.YouTubeDefinitions.SearchParameters) {
@@ -169,9 +96,11 @@ function bail<T>(promises: Promise<T>[]): Promise<T[]> {
             results[i] = result;
             completed++;
             if (completed === promises.length) {
+                console.log(`[bail] ${completed} promise resolved`);
                 resolver.resolve(results);
             }
         }, error => {
+            console.warn(`[bail] bail out with error "${error.stack}"`);
             resolver.reject(error);
         });
     }
@@ -183,6 +112,20 @@ function filterTitle(original: string) {
         .replace(/【(.*?)】/g, '')
         .replace(/\[.*?\]/g, '')
         .trim()
+}
+
+function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean {
+    if (typeof video.liveStreamingDetails !== 'object' ||
+        video.liveStreamingDetails === null) {
+        return true;
+    }
+
+    if (typeof video.liveStreamingDetails.scheduledStartTime === 'undefined' &&
+        typeof video.liveStreamingDetails.actualStartTime === 'undefined') {
+        return true;
+    }
+
+    return false;
 }
 
 (async () => {
@@ -207,17 +150,30 @@ function filterTitle(original: string) {
         }
     }
 
+    if (typeof config.ignoreVideoIds === 'undefined') {
+        config.ignoreVideoIds = [];
+    }
+
     if (existsSync('youtube.json')) {
         const list = JSON.parse(readFileSync('youtube.json', 'utf-8'));
 
-        for (const item of list) {
-            const publishedAt = new Date(item.snippet.publishedAt);
-            if (publishedAfter[item.snippet.channelId] < publishedAt) {
+        for (const video of list) {
+            if (config.ignoreVideoIds.includes(video.id)) {
+                continue;
+            }
+
+            if (isInvalidVideo(video)) {
+                console.warn("WTF it's not a live stream? " + video.id);
+                continue;
+            }
+
+            const publishedAt = new Date(video.snippet.publishedAt);
+            if (publishedAfter[video.snippet.channelId] < publishedAt) {
                 // publishedAfter[item.snippet.channelId] = publishedAt;
             }
 
-            videos.set(item.id, item);
-            idSet.add(item.id);
+            videos.set(video.id, video);
+            idSet.add(video.id);
         }
 
         console.log(`${idSet.size} known ids before searching`);
@@ -268,7 +224,7 @@ function filterTitle(original: string) {
                 });
 
                 for (const video of result.items) {
-                    if (typeof video.liveStreamingDetails !== 'object') {
+                    if (isInvalidVideo(video)) {
                         console.warn("WTF it's not a live stream? " + video.id);
                         continue;
                     }
@@ -281,7 +237,7 @@ function filterTitle(original: string) {
                         // etag can be different even if other fields are the same.
                         // doing a deep equality test without etag field.
                         if (JSON.stringify(old) === JSON.stringify(video)) {
-                            continue;
+                            // continue;
                         }
                     }
 
@@ -310,11 +266,6 @@ function filterTitle(original: string) {
         writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
     } else {
         for (const video of videos.values()) {
-            if (typeof video.liveStreamingDetails !== 'object') {
-                console.warn("WTF it's not a live stream? " + video.id);
-                continue;
-            }
-
             const eventTime = new Date(
                 video.liveStreamingDetails.actualStartTime ||
                 video.liveStreamingDetails.scheduledStartTime)
@@ -341,17 +292,28 @@ function filterTitle(original: string) {
     }
     MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
 
-    const calendars = await MicrosoftGraph.listCalendars(dispatcher);
-    const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);
+    const calendarFile = 'calendar.json';
+    let calendarView: CalendarView;
+    if (existsSync(calendarFile)) {
+        calendarView = await CalendarView.open(calendarFile, undefined);
+    } else {
+        const calendars = await MicrosoftGraph.listCalendars(dispatcher);
+        const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);
 
-    if (typeof calendar === 'undefined') {
-        throw new Error('cannot find an Outlook Calendar with name ' + config.outlookCalendarName);
+        if (typeof calendar === 'undefined') {
+            throw new Error('cannot find an Outlook Calendar with name ' + config.outlookCalendarName);
+        }
+
+        calendarView = await CalendarView.open(calendarFile, calendar.id);
     }
 
     const viewStartTime = addDays(new Date(viewStart), -1);
     const viewEndTime = addDays(new Date(viewEnd), 1);
 
-    let view = await MicrosoftGraph.getCalendarView(dispatcher, calendar.id, viewStartTime, viewEndTime);
+    // await calendarView.update(dispatcher, viewStartTime, viewEndTime);
+    await calendarView.getAll(dispatcher);
+
+    let view = calendarView.getEvents();
     console.log(`got calendar view with ${view.length} events`);
 
     tasks = [];
@@ -361,7 +323,15 @@ function filterTitle(original: string) {
         const item = toProcess[0];
         toProcess = toProcess.slice(1);
 
-        const duplicates = view.filter(x => x !== item && x.subject === item.subject && x.start.dateTime === item.start.dateTime);
+        if (item.type === 'occurrence') {
+            continue;
+        }
+
+        const duplicates = view.filter(x =>
+            x.type !== 'occurrence' &&
+            x !== item &&
+            x.subject === item.subject &&
+            x.start.dateTime === item.start.dateTime);
         toProcess = toProcess.filter(x => !duplicates.includes(x));
         view = view.filter(x => !duplicates.includes(x));
 
@@ -371,29 +341,56 @@ function filterTitle(original: string) {
         }
     }
 
-    const eventsById: Map<string, MicrosoftGraph.Event> = new Map();
-    const eventsByName: Map<string, MicrosoftGraph.Event[]> = new Map();
+    const eventsById: Map<string, MicrosoftGraph.CalendarEvent> = new Map();
+    const eventsByName: Map<string, MicrosoftGraph.CalendarEvent[]> = new Map();
     for (const event of view) {
-        event.body.content = stripHtml(event.body.content);
-        const body = Yaml.parse<EventBody>(event.body.content);
-        if (Array.isArray(body.references)) {
-            const url = body.references.find(x => x.includes('youtube.com'));
-            if (url) {
-                const parts = url.split('=');
-                const id = parts[parts.length - 1];
-                eventsById.set(id, event);
-            }
+        if (event.type === 'occurrence') {
+            continue;
         }
 
-        const name = event.subject.split('-').map(x => x.trim())[0];
-        if (!eventsByName.has(name)) {
-            eventsByName.set(name, []);
+        if (!event.body) {
+            console.warn(`${event.subject} doesn't have body`);
+            continue;
         }
-        eventsByName.get(name)!.push(event);
+
+        event.body.content = stripHtml(event.body.content);
+
+        try {
+            const body = Yaml.parse<EventBody>(event.body.content);
+
+            if (typeof body.youtube_id === 'string') {
+                eventsById.set(body.youtube_id, event);
+                continue;
+            }
+
+            if (Array.isArray(body.references)) {
+                const url = body.references.find(x => x.includes('youtube.com'));
+                if (url) {
+                    const parts = url.split('=');
+                    const id = parts[parts.length - 1];
+                    eventsById.set(id, event);
+                    continue;
+                }
+            }
+
+            const name = event.subject.split('-').map(x => x.trim())[0];
+            if (!eventsByName.has(name)) {
+                eventsByName.set(name, []);
+            }
+            eventsByName.get(name)!.push(event);
+        } catch (e) {
+            console.error(`error parsing body for ${event.subject}`);
+        }
     }
 
     for (const video of videoToUpdate) {
-        const channelName = config.youtubeChannels.find(x => x.id === video.snippet.channelId)!.nickname;
+        const channel = config.youtubeChannels.find(x => x.id === video.snippet.channelId);
+        if (typeof channel === 'undefined') {
+            console.warn(`unknwon channel ${video.snippet.channelId}`);
+            continue;
+        }
+
+        const channelName = channel.nickname;
 
         const title = video.snippet.title;
         const filtered = filterTitle(title);
@@ -408,7 +405,7 @@ function filterTitle(original: string) {
                 ? new Date().toISOString()
                 : addHours(new Date(startTime), 1).toISOString());
 
-        let exist: MicrosoftGraph.Event | undefined;
+        let exist: MicrosoftGraph.CalendarEvent | undefined;
         if (eventsById.has(video.id)) {
             exist = eventsById.get(video.id);
         } else if (eventsByName.has(channelName)) {
@@ -418,7 +415,13 @@ function filterTitle(original: string) {
             });
         }
 
-        const event: Partial<MicrosoftGraph.Event> = {
+        const body: EventBody = {
+            original_title: title,
+            references: [`https://www.youtube.com/watch?v=${video.id}`],
+            youtube_id: video.id,
+        };
+
+        const event: Partial<MicrosoftGraph.CalendarEvent> = {
             subject: `${channelName} - ${filtered}`,
             start: {
                 dateTime: startTime,
@@ -429,10 +432,7 @@ function filterTitle(original: string) {
                 timeZone: 'UTC',
             },
             body: {
-                content: Yaml.stringify({
-                    original_title: title,
-                    references: [`https://www.youtube.com/watch?v=${video.id}`],
-                }),
+                content: '',
                 contentType: 'text',
             },
             recurrence: null,
@@ -441,20 +441,34 @@ function filterTitle(original: string) {
 
         if (!exist) {
             console.log('creating ', event.subject);
-            tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
+            event.body!.content = Yaml.stringify(body);
+            tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendarView.calendarId, event)));
         } else {
-            const data: any = Yaml.parse(exist.bodyPreview);
-            if (data && data.title) {
-                const old_filtered = filterTitle(data.title);
+            const data: EventBody = Yaml.parse(exist.body.content);
+            if (data && data.original_title) {
+                const old_filtered = filterTitle(data.original_title);
                 if (exist.subject !== `${channelName} - ${old_filtered}`) {
                     event.subject = exist.subject;
                 }
             }
 
-            event.body!.content = Yaml.stringify(deepMerge(data, {
-                original_title: title,
-                references: [`https://www.youtube.com/watch?v=${video.id}`],
-            }));
+            if (Array.isArray(data.references)) {
+                let youtubeIdFound = false;
+                data.references = data.references.filter(x => {
+                    if (!x.includes('youtube.com/')) {
+                        return true;
+                    }
+
+                    if (!youtubeIdFound) {
+                        youtubeIdFound = true;
+                        return true;
+                    }
+
+                    return false;
+                })
+            }
+
+            event.body!.content = Yaml.stringify(deepMerge(data, body));
 
             if (event.subject === exist.subject &&
                 new Date(event.start!.dateTime).getTime() === new Date(exist.start.dateTime + 'Z').getTime() &&
@@ -465,7 +479,7 @@ function filterTitle(original: string) {
 
             if (exist.type === 'occurrence' || exist.type === 'exception') {
                 tasks.push(retry(() => MicrosoftGraph.deleteEvent(dispatcher, exist!.id)));
-                tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
+                tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendarView.calendarId, event)));
             } else {
                 console.log(`updating ${video.id} ${event.subject}`);
                 tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, exist!.id, event)));

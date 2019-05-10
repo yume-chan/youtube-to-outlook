@@ -56,8 +56,7 @@ export namespace Google {
 
     async function requestApi(path: string, dispatcher: AsyncDispatcher, params: object): Promise<any> {
         const normalized: any = {
-            key: key,
-            quotaUser: randomBytes(20).toString('hex'),
+            key,
         };
 
         for (const [key, value] of Object.entries(params)) {
@@ -98,11 +97,11 @@ export namespace Google {
             return result;
         }
         catch (err) {
-            if (isJsonRequestError<Response>(err) &&
-                err.body.error.errors.find(x => x.reason === 'quotaExceeded')) {
-                await delay(2000);
-                return await requestApi(path, dispatcher, params);
-            }
+            // if (isJsonRequestError<Response>(err) &&
+            //     err.body.error.errors.find(x => x.reason === 'quotaExceeded')) {
+            //     await delay(2000);
+            //     return await requestApi(path, dispatcher, params);
+            // }
 
             throw err;
         }

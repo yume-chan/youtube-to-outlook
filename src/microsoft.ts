@@ -1,9 +1,10 @@
 import { globalAgent, Agent } from 'https';
-import { URLSearchParams } from 'url';
+import { URL } from 'url';
 import HttpsProxyAgent from 'https-proxy-agent';
 import { OutgoingHttpHeaders } from 'http';
 import { AsyncDispatcher } from './async-dispatcher';
 import request, { isJsonRequestError } from './json-request';
+import { deepMerge } from './util';
 
 let accessToken: string;
 
@@ -17,7 +18,7 @@ async function requestApi(
     dispatcher: AsyncDispatcher,
     method: string,
     path: string,
-    params: object
+    params?: object
 ): Promise<any> {
     let headers: OutgoingHttpHeaders = {
         Authorization: `Bearer ${accessToken}`,
@@ -50,7 +51,14 @@ export interface Calendar {
 }
 
 export interface Response<T> {
+    ['@odata.nextLink']?: string;
     value: T;
+}
+
+interface CalendarViewDeltaResponse {
+    ['@odata.nextLink']?: string;
+    ['@odata.deltaLink']?: string;
+    value: Delta<CalendarEvent>[];
 }
 
 export function listCalendars(dispathcer: AsyncDispatcher): Promise<Response<Calendar[]>> {
@@ -67,7 +75,7 @@ interface DateTimeTimeZone {
     timeZone: string;
 }
 
-export interface Event {
+export interface CalendarEvent {
     body: ItemBody;
     bodyPreview: string;
     id: string;
@@ -78,6 +86,8 @@ export interface Event {
     subject: string;
     type: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster';
 }
+
+type Delta<T> = Partial<T> & { id: string;['@removed']?: { reason: string } };
 
 async function retry<T>(body: () => Promise<T>, max: number = 10): Promise<T> {
     let i = 0;
@@ -98,47 +108,83 @@ export async function getCalendarView(
     id: string,
     startDateTime: Date,
     endDateTime: Date
-): Promise<Event[]> {
-    const data = await requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
+): Promise<CalendarEvent[]> {
+    let data: Response<CalendarEvent[]> = await requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
         startDateTime: startDateTime.toISOString(),
         endDateTime: endDateTime.toISOString(),
-        $count: true,
-        $top: 0,
+        $top: 1000,
     });
 
-    const count: number = data['@odata.count'];
-    // const tasks: Promise<Response<Event[]>>[] = [];
-    const pageSize: number = 1000;
+    const results: CalendarEvent[][] = [data.value];
 
-    let result: Event[] = [];
-    for (let i = 0; i < count; i += pageSize) {
-        const page = await retry(() => requestApi(dispathcer, 'GET', `/me/calendars/${id}/calendarView`, {
-            startDateTime: startDateTime.toISOString(),
-            endDateTime: endDateTime.toISOString(),
-            $count: true,
-            $top: pageSize,
-            $skip: i,
-        })) as Response<Event[]>;
-
-        result = result.concat(page.value);
+    while (data['@odata.nextLink']) {
+        data = await retry(() => requestApi(dispathcer, 'GET', getPath(data['@odata.nextLink']!)));
+        results.push(data.value);
     }
 
-    // const results = await Promise.all(tasks);
-
-    // // keep order
-    // return results.reduce<Event[]>((list, result) => list.concat(result.value), []);
-
-    return result;
+    return ([] as CalendarEvent[]).concat.apply([], results);
 }
 
-export function createEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<Event>): Promise<Event> {
+export function createEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<CalendarEvent>): Promise<CalendarEvent> {
     return requestApi(dispathcer, 'POST', `/me/calendars/${id}/events`, event);
 }
 
-export function updateEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<Event>): Promise<Event> {
+export function updateEvent(dispathcer: AsyncDispatcher, id: string, event: Partial<CalendarEvent>): Promise<CalendarEvent> {
     return requestApi(dispathcer, 'PATCH', `/me/events/${id}`, event);
 }
 
 export function deleteEvent(dispathcer: AsyncDispatcher, id: string): Promise<void> {
     return requestApi(dispathcer, 'DELETE', `/me/events/${id}`, {});
+}
+
+function mergeEvents(events: { [id: string]: CalendarEvent }, delta: Delta<CalendarEvent>[]) {
+    for (const item of delta) {
+        if (item['@removed']) {
+            delete events[item.id];
+        } else {
+            events[item.id] = deepMerge(events[item.id], item);
+        }
+    }
+}
+
+function getPath(url: string) {
+    const parsed = new URL(url);
+    return parsed.pathname.substring('/v1.0'.length) + parsed.search;
+}
+
+export async function getDeltaInitial(
+    dispatcher: AsyncDispatcher,
+    id: string,
+    startDateTime: Date,
+    endDateTime: Date,
+    events: { [id: string]: CalendarEvent },
+): Promise<string> {
+    let data: CalendarViewDeltaResponse = await requestApi(dispatcher, 'GET', `/me/calendars/${id}/calendarView/delta`, {
+        startDateTime: startDateTime.toISOString(),
+        endDateTime: endDateTime.toISOString(),
+    });
+    mergeEvents(events, data.value);
+
+    while (data['@odata.nextLink']) {
+        data = await retry(() => requestApi(dispatcher, 'GET', getPath(data['@odata.nextLink']!)));
+        mergeEvents(events, data.value);
+    }
+
+    return data['@odata.deltaLink']!;
+}
+
+export async function getDelta(
+    dispatcher: AsyncDispatcher,
+    deltaLink: string,
+    events: { [id: string]: CalendarEvent }
+): Promise<string> {
+    let data: CalendarViewDeltaResponse = await requestApi(dispatcher, 'GET', getPath(deltaLink));
+    mergeEvents(events, data.value);
+
+    while (data['@odata.nextLink']) {
+        data = await retry(() => requestApi(dispatcher, 'GET', getPath(data['@odata.nextLink']!)));
+        mergeEvents(events, data.value);
+    }
+
+    return data['@odata.deltaLink']!;
 }
