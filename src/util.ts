@@ -36,6 +36,14 @@ export function detailType(value: any) {
 export function deepMerge(...args: any[]): any {
     args = args.filter(x => typeof x !== 'undefined' && x !== null);
 
+    if (args.length === 0) {
+        return undefined;
+    }
+
+    if (args.length === 1) {
+        return args[0];
+    }
+
     const keySet: Set<string> = new Set();
     for (const arg of args) {
         for (const key of Object.keys(arg)) {

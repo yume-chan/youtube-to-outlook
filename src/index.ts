@@ -91,14 +91,22 @@ function bail<T>(promises: Promise<T>[]): Promise<T[]> {
     let completed = 0;
     const results: T[] = [];
     const resolver = new PromiseResolver<T[]>();
+    let set: Set<number> = new Set();
     for (let i = 0; i < promises.length; i++) {
+        set.add(i);
         promises[i].then(result => {
             results[i] = result;
             completed++;
+            console.log(`[bail] task no.${i + 1} completed`);
+            console.log(`[bail] ${completed} of ${promises.length} tasks have completed`);
+
             if (completed === promises.length) {
-                console.log(`[bail] ${completed} promise resolved`);
                 resolver.resolve(results);
+                return;
             }
+
+            set.delete(i);
+            console.log(`[bail] tasks no.${Array.from(set).join(', ')} have not completed`);
         }, error => {
             console.warn(`[bail] bail out with error "${error.stack}"`);
             resolver.reject(error);
@@ -169,7 +177,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
 
             const publishedAt = new Date(video.snippet.publishedAt);
             if (publishedAfter[video.snippet.channelId] < publishedAt) {
-                // publishedAfter[item.snippet.channelId] = publishedAt;
+                // publishedAfter[video.snippet.channelId] = publishedAt;
             }
 
             videos.set(video.id, video);
@@ -183,108 +191,114 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
         Google.setProxy(config.googleApiProxy);
     }
 
-    let viewStart = Infinity;
-    let viewEnd = 0;
+    let viewStart = addDays(new Date(), -1).getTime();
+    let viewEnd = addDays(new Date(), 1).getTime();
     const videoToUpdate: Google.YouTubeDefinitions.VideoResponse[] = [];
 
-    if (true) {
-        Google.setHeaders(config.googleApiHeaders);
-        Google.setApiKey(config.googleApiKey);
+    let mode: 'fetch' | 'cache' | 'none' = 'fetch' as 'fetch' | 'cache' | 'none';
+    console.log(`mode is ${mode}`);
 
-        tasks = config.youtubeChannels.reduce((result, channel) => {
-            return result.concat(
-                (['completed', 'live', 'upcoming'] as const).map(async eventType => {
-                    const result = await searchAll(dispatcher, {
-                        part: ['id'],
-                        channelId: channel.id,
-                        type: 'video',
-                        eventType,
-                        order: "date",
-                        publishedAfter: publishedAfter[channel.id].toISOString(),
-                        maxResults: 50,
+    switch (mode) {
+        case 'fetch':
+            Google.setHeaders(config.googleApiHeaders);
+            Google.setApiKey(config.googleApiKey);
+
+            tasks = config.youtubeChannels.reduce((result, channel) => {
+                return result.concat(
+                    (['completed', 'live', 'upcoming'] as const).map(async eventType => {
+                        const result = await searchAll(dispatcher, {
+                            part: ['id'],
+                            channelId: channel.id,
+                            type: 'video',
+                            eventType,
+                            order: "date",
+                            publishedAfter: publishedAfter[channel.id].toISOString(),
+                            maxResults: 50,
+                        });
+
+                        for (const item of result) {
+                            idSet.add(item);
+                        }
+                    }));
+            }, [] as Promise<void>[]);
+
+            await bail(tasks);
+            console.log(`${idSet.size} known ids after searching`);
+
+            tasks = [];
+            const ids = Array.from(idSet);
+            const pageSize = 50;
+            for (let i = 0; i < ids.length; i += pageSize) {
+                tasks.push(retry(async () => {
+                    const result = await Google.YouTube.videos(dispatcher, {
+                        part: ['snippet', 'liveStreamingDetails'],
+                        id: ids.slice(i, i + pageSize),
                     });
 
-                    for (const item of result) {
-                        idSet.add(item);
+                    for (const video of result.items) {
+                        if (isInvalidVideo(video)) {
+                            console.warn("WTF it's not a live stream? " + video.id);
+                            continue;
+                        }
+
+                        if (videos.has(video.id)) {
+                            const old = { ...videos.get(video.id)! };
+                            delete old.etag;
+                            delete video.etag;
+
+                            // etag can be different even if other fields are the same.
+                            // doing a deep equality test without etag field.
+                            if (JSON.stringify(old) === JSON.stringify(video)) {
+                                continue;
+                            }
+                        }
+
+                        videoToUpdate.push(video);
+
+                        const eventTime = new Date(
+                            video.liveStreamingDetails.actualStartTime ||
+                            video.liveStreamingDetails.scheduledStartTime)
+                            .getTime();
+
+                        if (eventTime < viewStart) {
+                            viewStart = eventTime;
+                        }
+
+                        if (eventTime > viewEnd) {
+                            viewEnd = eventTime;
+                        }
+
+                        videos.set(video.id, video);
                     }
                 }));
-        }, [] as Promise<void>[]);
+            }
 
-        await bail(tasks);
+            await bail(tasks);
 
-        console.log(`${idSet.size} known ids after searching`);
+            writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
 
-        const ids = Array.from(idSet);
-        const pageSize = 25;
-        for (let i = 0; i < ids.length; i += pageSize) {
-            tasks.push(retry(async () => {
-                const result = await Google.YouTube.videos(dispatcher, {
-                    part: ['snippet', 'liveStreamingDetails'],
-                    id: ids.slice(i, i + pageSize),
-                });
+            if (videoToUpdate.length === 0) {
+                return;
+            }
+            break;
+        case 'cache':
+            for (const video of videos.values()) {
+                const eventTime = new Date(
+                    video.liveStreamingDetails.actualStartTime ||
+                    video.liveStreamingDetails.scheduledStartTime)
+                    .getTime();
 
-                for (const video of result.items) {
-                    if (isInvalidVideo(video)) {
-                        console.warn("WTF it's not a live stream? " + video.id);
-                        continue;
-                    }
-
-                    if (videos.has(video.id)) {
-                        const old = { ...videos.get(video.id)! };
-                        delete old.etag;
-                        delete video.etag;
-
-                        // etag can be different even if other fields are the same.
-                        // doing a deep equality test without etag field.
-                        if (JSON.stringify(old) === JSON.stringify(video)) {
-                            // continue;
-                        }
-                    }
-
-                    videoToUpdate.push(video);
-
-                    const eventTime = new Date(
-                        video.liveStreamingDetails.actualStartTime ||
-                        video.liveStreamingDetails.scheduledStartTime)
-                        .getTime();
-
-                    if (eventTime < viewStart) {
-                        viewStart = eventTime;
-                    }
-
-                    if (eventTime > viewEnd) {
-                        viewEnd = eventTime;
-                    }
-
-                    videos.set(video.id, video);
+                if (eventTime < viewStart) {
+                    viewStart = eventTime;
                 }
-            }));
-        }
 
-        await bail(tasks);
+                if (eventTime > viewEnd) {
+                    viewEnd = eventTime;
+                }
 
-        writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
-    } else {
-        for (const video of videos.values()) {
-            const eventTime = new Date(
-                video.liveStreamingDetails.actualStartTime ||
-                video.liveStreamingDetails.scheduledStartTime)
-                .getTime();
-
-            if (eventTime < viewStart) {
-                viewStart = eventTime;
+                videoToUpdate.push(video);
             }
-
-            if (eventTime > viewEnd) {
-                viewEnd = eventTime;
-            }
-
-            videoToUpdate.push(video);
-        }
-    }
-
-    if (videoToUpdate.length === 0) {
-        return;
+            break;
     }
 
     if (typeof config.microsoftApiProxy === 'string') {
@@ -307,11 +321,11 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
         calendarView = await CalendarView.open(calendarFile, calendar.id);
     }
 
-    const viewStartTime = addDays(new Date(viewStart), -1);
-    const viewEndTime = addDays(new Date(viewEnd), 1);
-
+    // const viewStartTime = addDays(new Date(viewStart), -1);
+    // const viewEndTime = addDays(new Date(viewEnd), 1);
     // await calendarView.update(dispatcher, viewStartTime, viewEndTime);
-    await calendarView.getAll(dispatcher);
+
+    await retry(() => calendarView.getAll(dispatcher));
 
     let view = calendarView.getEvents();
     console.log(`got calendar view with ${view.length} events`);
@@ -348,8 +362,23 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
             continue;
         }
 
+        let [nickname, subject] = event.subject.split('-').map(x => x.trim());
+
+        const alias = config.youtubeChannels.find(x => typeof x.alias !== 'undefined' && x.alias.includes(nickname));
+        if (typeof alias !== 'undefined') {
+            nickname = alias.nickname;
+            event.subject = `${nickname} - ${subject}`;
+            tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, event.id, { subject: event.subject })));
+        }
+
         if (!event.body) {
             console.warn(`${event.subject} doesn't have body`);
+
+            if (!eventsByName.has(nickname)) {
+                eventsByName.set(nickname, []);
+            }
+            eventsByName.get(nickname)!.push(event);
+
             continue;
         }
 
@@ -373,11 +402,33 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
                 }
             }
 
-            const name = event.subject.split('-').map(x => x.trim())[0];
-            if (!eventsByName.has(name)) {
-                eventsByName.set(name, []);
+            if (Array.isArray(body.participants)) {
+                let update = false;
+
+                for (let i = 0; i < body.participants.length; i++) {
+                    let nickname = body.participants[i];
+
+                    const alias = config.youtubeChannels.find(x => typeof x.alias !== 'undefined' && x.alias.includes(nickname));
+                    if (typeof alias !== 'undefined') {
+                        body.participants[i] = alias.nickname;
+                        update = true;
+                    }
+                }
+
+                if (update) {
+                    tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, event.id, {
+                        body: {
+                            content: Yaml.stringify(body),
+                            contentType: 'text',
+                        },
+                    })));
+                }
             }
-            eventsByName.get(name)!.push(event);
+
+            if (!eventsByName.has(nickname)) {
+                eventsByName.set(nickname, []);
+            }
+            eventsByName.get(nickname)!.push(event);
         } catch (e) {
             console.error(`error parsing body for ${event.subject}`);
         }

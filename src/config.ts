@@ -23,6 +23,7 @@ export default interface Config {
     youtubeChannels: {
         id: string;
         nickname: string;
+        alias?: string[];
     }[];
 
     extraVideoIds?: string[];
