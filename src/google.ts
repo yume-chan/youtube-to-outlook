@@ -1,8 +1,7 @@
 import { globalAgent, Agent } from 'https';
 import HttpsProxyAgent from 'https-proxy-agent';
-import { randomBytes } from 'crypto';
-import { AsyncDispatcher, delay } from './async-dispatcher';
-import request, { isJsonRequestError } from './json-request';
+import { AsyncDispatcher } from './async-dispatcher';
+import request from './json-request';
 
 export namespace Google {
     let key: string;
@@ -44,13 +43,6 @@ export namespace Google {
         [api: string]: ApiDefinition<any, any> | ApiDefinitions;
     }
 
-    interface Response {
-        error: {
-            errors: {
-                reason: string,
-            }[],
-        },
-    }
 
     const host = 'content.googleapis.com';
 
@@ -82,9 +74,7 @@ export namespace Google {
         }
 
         try {
-            const result = await request<any>('GET', dispatcher, {
-                host,
-                path,
+            const result = await request<any>('GET', dispatcher, `https://${host}${path}`, {
                 headers,
                 agent,
                 timeout: 10000,

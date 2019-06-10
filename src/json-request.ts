@@ -1,5 +1,6 @@
-import { AsyncDispatcher, HttpsRequestOptions, isHttpsRequestError } from "./async-dispatcher";
-import { URLSearchParams, pathToFileURL } from "url";
+import { Request, RequestInit } from "node-fetch";
+import { AsyncDispatcher, isHttpsRequestError } from "./async-dispatcher";
+import { URLSearchParams } from "url";
 
 export interface JsonRequestError<T> extends Error {
     statusCode?: number;
@@ -12,9 +13,9 @@ export function isJsonRequestError<T>(value: unknown): value is JsonRequestError
     return typeof error === 'number' && typeof error !== 'undefined';
 }
 
-async function request<T>(dispatcher: AsyncDispatcher, options: HttpsRequestOptions): Promise<T | undefined> {
+async function request<T>(dispatcher: AsyncDispatcher, url: string, options: RequestInit): Promise<T | undefined> {
     try {
-        const response = await dispatcher.request(options);
+        const response = await dispatcher.request(new Request(url, options));
         const responseText = response.toString('utf8');
         if (responseText === '') {
             return undefined;
@@ -40,31 +41,27 @@ async function request<T>(dispatcher: AsyncDispatcher, options: HttpsRequestOpti
 function noBody<T>(
     method: string,
     dispatcher: AsyncDispatcher,
-    options: HttpsRequestOptions,
+    url: string,
+    options: RequestInit,
     params?: { [key: string]: string }
 ): Promise<T | undefined> {
     if (params && Object.keys(params).length) {
-        if (options.path.includes('?')) {
-            options.path += '&'
+        if (url.includes('?')) {
+            url += '&'
         } else {
-            options.path += '?';
+            url += '?';
         }
-        options.path += new URLSearchParams(params).toString();
+        url += new URLSearchParams(params).toString();
     }
 
-    options = {
-        ...options,
-        method,
-        path: options.path,
-    };
-
-    return request<T>(dispatcher, options);
+    return request<T>(dispatcher, url, options);
 }
 
 function hasBody<T>(
     method: string,
     dispatcher: AsyncDispatcher,
-    options: HttpsRequestOptions,
+    url: string,
+    options: RequestInit,
     params: object
 ): Promise<T | undefined> {
     options = {
@@ -77,23 +74,24 @@ function hasBody<T>(
         body: JSON.stringify(params),
     };
 
-    return request<T>(dispatcher, options);
+    return request<T>(dispatcher, url, options);
 }
 
 export default <T>(
     method: string,
     dispatcher: AsyncDispatcher,
-    options: HttpsRequestOptions,
+    url: string,
+    options: RequestInit,
     params?: any
 ): Promise<T | undefined> => {
     switch (method) {
         case 'GET':
-            return noBody(method, dispatcher, options, params);
+            return noBody(method, dispatcher, url, options, params);
         case 'POST':
         case 'PUT':
         case 'PATCH':
         case 'DELETE':
-            return hasBody(method, dispatcher, options, params);
+            return hasBody(method, dispatcher, url, options, params);
         default:
             throw new Error(`unknown value for argument \`method\`, got ${method}`);
     }

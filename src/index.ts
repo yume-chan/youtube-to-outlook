@@ -1,12 +1,12 @@
 ﻿import { readFileSync, writeFileSync, existsSync } from 'fs';
 
+import * as Yaml from './yaml';
 import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
-import * as Yaml from './yaml';
 import config from '../config';
-import { stripHtml, EventBody, deepMerge } from './util';
 import { AsyncDispatcher } from './async-dispatcher';
 import { Calendar as CalendarView } from './calendar';
+import { EventBody, stripHtml, deepMerge } from './util';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
 
@@ -138,9 +138,6 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
 
 (async () => {
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
-    // setInterval(() => {
-    //     console.log(dispatcher.activeRequests.map(x => `${dispatcher.requestStatus.get(x)} ${x.path}`).join('\n'));
-    // }, 10000);
 
     let tasks: Promise<any>[];
     const videos: Map<string, Google.YouTubeDefinitions.VideoResponse> = new Map();
@@ -249,7 +246,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
                             // etag can be different even if other fields are the same.
                             // doing a deep equality test without etag field.
                             if (JSON.stringify(old) === JSON.stringify(video)) {
-                                continue;
+                                // continue;
                             }
                         }
 
@@ -321,9 +318,11 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
         calendarView = await CalendarView.open(calendarFile, calendar.id);
     }
 
-    // const viewStartTime = addDays(new Date(viewStart), -1);
-    // const viewEndTime = addDays(new Date(viewEnd), 1);
+    // const viewStartTime = new Date('2019-06-15T00:00:00Z');
+    // const viewEndTime = new Date('2019-06-20T00:00:00Z');
     // await calendarView.update(dispatcher, viewStartTime, viewEndTime);
+
+    // process.exit();
 
     await retry(() => calendarView.getAll(dispatcher));
 
@@ -367,7 +366,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
         const alias = config.youtubeChannels.find(x => typeof x.alias !== 'undefined' && x.alias.includes(nickname));
         if (typeof alias !== 'undefined') {
             nickname = alias.nickname;
-            event.subject = `${nickname} - ${subject}`;
+            event.subject = `${nickname}${subject ? ` - ${subject}` : ''}`;
             tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, event.id, { subject: event.subject })));
         }
 

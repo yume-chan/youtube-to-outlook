@@ -1,7 +1,7 @@
 import { globalAgent, Agent } from 'https';
 import { URL } from 'url';
+import { HeadersInit } from 'node-fetch';
 import HttpsProxyAgent from 'https-proxy-agent';
-import { OutgoingHttpHeaders } from 'http';
 import { AsyncDispatcher } from './async-dispatcher';
 import request, { isJsonRequestError } from './json-request';
 import { deepMerge } from './util';
@@ -20,14 +20,12 @@ async function requestApi(
     path: string,
     params?: object
 ): Promise<any> {
-    let headers: OutgoingHttpHeaders = {
+    let headers: HeadersInit = {
         Authorization: `Bearer ${accessToken}`,
     };
 
     try {
-        return await request(method, dispatcher, {
-            host: 'graph.microsoft.com',
-            path: `/v1.0${path}`,
+        return await request(method, dispatcher, `https://graph.microsoft.com/v1.0${path}`, {
             headers,
             agent,
             timeout: 60000,
@@ -84,6 +82,9 @@ export interface CalendarEvent {
     start: DateTimeTimeZone;
     recurrence: null;
     subject: string;
+
+    seriesMasterId?: string;
+
     type: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster';
 }
 
@@ -143,11 +144,24 @@ function mergeEvents(events: { [id: string]: CalendarEvent }, delta: Delta<Calen
             const exist = events[item.id];
             if (typeof exist !== 'undefined') {
                 console.log(`[calendar view delta] delete event ${exist.subject}`);
+                console.log(`reason: ${item['@removed'].reason}`);
                 delete events[item.id];
             }
         } else {
-            console.log(`[calendar view delta] merging event ${events[item.id].subject}`);
-            events[item.id] = deepMerge(events[item.id], item);
+            let event: CalendarEvent | undefined;
+            if (events[item.id]) {
+                event = events[item.id];
+            }
+
+            if (item.type === 'occurrence') {
+                event = deepMerge(event, events[item.seriesMasterId!]);
+                delete event!.seriesMasterId;
+            }
+
+            event = deepMerge(event, item);
+            console.log(`[calendar view delta] merge event ${event!.subject}`);
+
+            events[item.id] = event!;
         }
     }
 }

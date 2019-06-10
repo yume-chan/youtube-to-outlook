@@ -15,6 +15,38 @@ interface CalendarFile {
     events: { [id: string]: CalendarEvent };
 }
 
+function compare(a: any, b: any) {
+    if (a < b)
+        return -1;
+
+    if (a === b)
+        return 0;
+
+    return 1;
+}
+
+function sortObject(input: any) {
+    if (typeof input !== "object" || input === null)
+        return input;
+
+    if (input instanceof Date) {
+        return input;
+    }
+
+    const keys = Object.keys(input).sort(compare);
+    const output: any = {};
+    for (const key of keys) {
+        let value = input[key];
+        if (Array.isArray(value))
+            for (const index in value)
+                value[parseInt(index)] = sortObject(value[index]);
+        else if (typeof value === "object")
+            value = sortObject(value);
+        output[key] = value;
+    }
+    return output;
+}
+
 export class Calendar {
     public static async open(path: string, calendarId?: string, sliceDuration: number = 30 * 24 * 60 * 60 * 1000): Promise<Calendar> {
         if (existsSync(path)) {
@@ -65,7 +97,7 @@ export class Calendar {
             slices: this._slices,
             events: this._events,
         };
-        const content = JSON.stringify(file, undefined, 4);
+        const content = JSON.stringify(sortObject(file), undefined, 4);
         await fs.writeFile(this._path, content);
     }
 
@@ -107,7 +139,7 @@ export class Calendar {
             // await this.save();
         }
 
-        await this.save();
+        // await this.save();
     }
 
     public async getAll(dispatcher: AsyncDispatcher): Promise<void> {
