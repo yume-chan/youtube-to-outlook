@@ -116,14 +116,19 @@ export async function getCalendarView(
         $top: 1000,
     });
 
-    const results: CalendarEvent[][] = [data.value];
+    let result: Map<string, CalendarEvent> = new Map();
+    for (const item of data.value) {
+        result.set(item.id, item);
+    }
 
     while (data['@odata.nextLink']) {
         data = await retry(() => requestApi(dispatcher, 'GET', getPath(data['@odata.nextLink']!)));
-        results.push(data.value);
+        for (const item of data.value) {
+            result.set(item.id, item);
+        }
     }
 
-    return ([] as CalendarEvent[]).concat.apply([], results);
+    return Array.from(result.values());
 }
 
 export function createEvent(dispatcher: AsyncDispatcher, id: string, event: Partial<CalendarEvent>): Promise<CalendarEvent> {

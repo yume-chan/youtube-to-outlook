@@ -156,7 +156,8 @@ export class Calendar {
             }
         }
 
-        const events = await getCalendarView(dispatcher, this._calendarId, new Date(startTime), new Date(endTime));
+        // const events = await getCalendarView(dispatcher, this._calendarId, new Date(startTime), new Date(endTime));
+        const events = await getCalendarView(dispatcher, this._calendarId, new Date('2019-01-01T00:00:00Z'), new Date(endTime));
         this._events = {};
         for (const event of events) {
             this._events[event.id] = event;

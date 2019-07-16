@@ -9,7 +9,7 @@
             "type": "node",
             "request": "launch",
             "args": [
-                "src/index.ts"
+                "src/test.ts"
             ],
             "runtimeArgs": [
                 "--nolazy",

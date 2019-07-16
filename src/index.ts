@@ -5,7 +5,6 @@ import { Google } from "./google";
 import * as MicrosoftGraph from './microsoft';
 import config from '../config';
 import { AsyncDispatcher } from './async-dispatcher';
-import { Calendar as CalendarView } from './calendar';
 import { EventBody, stripHtml, deepMerge } from './util';
 
 const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
@@ -47,10 +46,11 @@ async function retry<T>(body: () => Promise<T>, max: number = Infinity): Promise
         try {
             return await body();
         } catch (e) {
+            console.warn(e);
+
             i++;
             if (i === max) {
-                console.error(`retry failed ${max} times with last error:`);
-                console.error(e);
+                console.error(`retried ${max} times but still failed`);
                 throw e;
             }
         }
@@ -97,7 +97,7 @@ function bail<T>(promises: Promise<T>[]): Promise<T[]> {
         promises[i].then(result => {
             results[i] = result;
             completed++;
-            console.log(`[bail] task no.${i + 1} completed`);
+            // console.log(`[bail] task no.${i + 1} completed`);
             console.log(`[bail] ${completed} of ${promises.length} tasks have completed`);
 
             if (completed === promises.length) {
@@ -106,7 +106,7 @@ function bail<T>(promises: Promise<T>[]): Promise<T[]> {
             }
 
             set.delete(i);
-            console.log(`[bail] tasks no.${Array.from(set).join(', ')} have not completed`);
+            // console.log(`[bail] tasks no.${Array.from(set).join(', ')} have not completed`);
         }, error => {
             console.warn(`[bail] bail out with error "${error.stack}"`);
             resolver.reject(error);
@@ -136,6 +136,27 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
     return false;
 }
 
+export async function getCalendarViewSplit(
+    dispatcher: AsyncDispatcher,
+    id: string,
+    startTime: Date,
+    endTime: Date,
+    split: number,
+): Promise<MicrosoftGraph.CalendarEvent[]> {
+    const start = startTime.getTime();
+    const end = endTime.getTime();
+
+    let result: Map<string, MicrosoftGraph.CalendarEvent> = new Map();
+
+    for (let i = start; i < end; i += split) {
+        for (const item of await MicrosoftGraph.getCalendarView(dispatcher, id, new Date(i), new Date(i + split))) {
+            result.set(item.id, item);
+        }
+    }
+
+    return Array.from(result.values());
+}
+
 (async () => {
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
 
@@ -160,7 +181,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
     }
 
     if (existsSync('youtube.json')) {
-        const list = JSON.parse(readFileSync('youtube.json', 'utf-8'));
+        const list: Google.YouTubeDefinitions.VideoResponse[] = JSON.parse(readFileSync('youtube.json', 'utf-8'));
 
         for (const video of list) {
             if (config.ignoreVideoIds.includes(video.id)) {
@@ -172,9 +193,9 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
                 continue;
             }
 
-            const publishedAt = new Date(video.snippet.publishedAt);
+            const publishedAt = addDays(new Date(video.snippet.publishedAt), -30);
             if (publishedAfter[video.snippet.channelId] < publishedAt) {
-                // publishedAfter[video.snippet.channelId] = publishedAt;
+                publishedAfter[video.snippet.channelId] = publishedAt;
             }
 
             videos.set(video.id, video);
@@ -272,11 +293,14 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
 
             await bail(tasks);
 
-            writeFileSync('youtube.json', JSON.stringify(Array.from(videos.values()), undefined, 4));
+            const list = Array.from(videos.values());
+            list.sort((a, b) => a.snippet.channelId < b.snippet.channelId ? -1 : a.id < b.id ? -1 : 1);
+            writeFileSync('youtube.json', JSON.stringify(list, undefined, 4));
 
             if (videoToUpdate.length === 0) {
                 return;
             }
+            videoToUpdate.sort((a, b) => a.snippet.channelId < b.snippet.channelId ? -1 : a.id < b.id ? -1 : 1);
             break;
         case 'cache':
             for (const video of videos.values()) {
@@ -303,30 +327,14 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
     }
     MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
 
-    const calendarFile = 'calendar.json';
-    let calendarView: CalendarView;
-    if (existsSync(calendarFile)) {
-        calendarView = await CalendarView.open(calendarFile, undefined);
-    } else {
-        const calendars = await MicrosoftGraph.listCalendars(dispatcher);
-        const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);
+    const calendars = await MicrosoftGraph.listCalendars(dispatcher);
+    const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);
 
-        if (typeof calendar === 'undefined') {
-            throw new Error('cannot find an Outlook Calendar with name ' + config.outlookCalendarName);
-        }
-
-        calendarView = await CalendarView.open(calendarFile, calendar.id);
+    if (typeof calendar === 'undefined') {
+        throw new Error('cannot find an Outlook Calendar with name ' + config.outlookCalendarName);
     }
 
-    // const viewStartTime = new Date('2019-06-15T00:00:00Z');
-    // const viewEndTime = new Date('2019-06-20T00:00:00Z');
-    // await calendarView.update(dispatcher, viewStartTime, viewEndTime);
-
-    // process.exit();
-
-    await retry(() => calendarView.getAll(dispatcher));
-
-    let view = calendarView.getEvents();
+    let view = await retry(() => getCalendarViewSplit(dispatcher, calendar.id, new Date(viewStart), new Date(viewEnd), 1000 * 60 * 60 * 24 * 180));
     console.log(`got calendar view with ${view.length} events`);
 
     tasks = [];
@@ -492,7 +500,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
         if (!exist) {
             console.log('creating ', event.subject);
             event.body!.content = Yaml.stringify(body);
-            tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendarView.calendarId, event)));
+            tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
         } else {
             const data: EventBody = Yaml.parse(exist.body.content);
             if (data && data.original_title) {
@@ -529,7 +537,7 @@ function isInvalidVideo(video: Google.YouTubeDefinitions.VideoResponse): boolean
 
             if (exist.type === 'occurrence' || exist.type === 'exception') {
                 tasks.push(retry(() => MicrosoftGraph.deleteEvent(dispatcher, exist!.id)));
-                tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendarView.calendarId, event)));
+                tasks.push(retry(() => MicrosoftGraph.createEvent(dispatcher, calendar.id, event)));
             } else {
                 console.log(`updating ${video.id} ${event.subject}`);
                 tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, exist!.id, event)));
