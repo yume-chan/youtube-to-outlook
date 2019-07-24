@@ -4,13 +4,14 @@ A "does work" script that grabs YouTube Live Broadcast information (from past, n
 
 I created this for my [vtuber-calendar](https://github.com/yume-chan/vtuber-calendar) project, as fully manually maintenance costs too much time.
 
-THIS README IS A PIECE OF JUNK!
+- [YouTube to Outlook Calendar](#youtube-to-outlook-calendar)
+  - [Configuration](#configuration)
+    - [How to get the Google API Key?](#how-to-get-the-google-api-key)
+    - [Note for YouTube Data API v3 Quota](#note-for-youtube-data-api-v3-quota)
+    - [Want unlimited YouTube Data API v3 Quota?](#want-unlimited-youtube-data-api-v3-quota)
+  - [Run](#run)
 
-I know, but I don't have the mood to rewrite it because of the rubbish YouTube Data API v3.
-
-## Usage
-
-### Step 1: create a configuration file
+## Configuration
 
 Create a file called `config` at the root directory, with any file extension that can be `import`ed, including `js`, `ts` and `json`.
 
@@ -39,21 +40,13 @@ Check the comments in `src/config.ts` for detailed description.
 
 Please google it.
 
-### Note for API Quota
+### Note for YouTube Data API v3 Quota
 
 New projects created nowadays only have 10,000 points of quota for YouTube Data API v3 per day.
 
 When each `youtube.search.list` API call costs 100 points (for only 50 results) and each `youtube.video.list` API call costs 5 (or maybe any other number, I don't really care) points per video, it will blow up your quota limit very very quickly.
 
 So use with your own judgement.
-
-### Fix your API ASAP, Google!
-
-In theroy we can record the last updated time any only search for new events after that.
-
-~~~But sadly, all filters in `youtube.search.list` API are currently not functional~~~
-
-It's fixed now, but searching with `publishedAfter` contrain won't return all results.
 
 ### Want unlimited YouTube Data API v3 Quota?
 
@@ -63,52 +56,7 @@ But I don't want to publish it here.
 
 You may still reach the so called "per user quota", changing your IP address will "resolve" it.
 
-### Step 2: get your Microsoft Graph Access Token
-
-#### Complex way
-
-We use [Microsoft Graph API](https://docs.microsoft.com/en-us/graph/api/overview?view=graph-rest-1.0) to access your Outlook Calender. To do that, we need an access token for your Microsoft Account.
-
-Microsoft Graph API requires an [Application ID](https://docs.microsoft.com/en-us/graph/auth-register-app-v2?toc=./ref/toc.json&view=graph-rest-1.0) to be registered first, but I have included one in the project.
-
-Because all Microsft Graph API are free and unlimited, I believe there is no risk to publish my Application ID here. Anyway, it can only be used to access Outlook Calendar.
-
-1. Run
-
-    ```shell
-    npx http-server -p 3000 www
-    ```
-
-    in your terminal.
-
-    DONNOT change the port! That's important.
-
-2. Open `http://localhost:3000` in your browser.
-
-3. For the first time you open this page, click the <kbd>login</kbd> button. A popup will appear that let you log into your Microsoft Account.
-
-4. Click the <kbd>auth</kbd> button, another popup might appear (or maybe not, I'm not sure) that let you authorize my app to access (read and write) your Outlook Calendar.
-
-5. Anyway, after that, the webpage should only contains some garbage text (not truly garbage, technically).
-
-6. Select All, Copy, and Paste into `www/token.txt`
-
-   PS1. Create it if not exist.
-   PS2. To be more clear, put it besides the `index.html` file.
-
-7. You can close your browser and terminal as you wish.
-
-#### Easy way
-
-I have deployed the very same web site on my server, access https://chensi.moe/ms-auth, then start from step 3 above.
-
-### Refresh your access token
-
-If you see error says can not authenticate with the access token, repeat the steps above.
-
-The only differences is that you can skip clicking the <kbd>login</kbd> button first, and the <kbd>auth</kbd> button should not have any popups appears.
-
-### Do the work
+## Run
 
 1. Run
 
@@ -118,6 +66,7 @@ The only differences is that you can skip clicking the <kbd>login</kbd> button f
 
     in your terminal.
 
-2. Sit back and pray that no errors will occur.
+2. A browser will open to let you sign into your Microsoft Account.
+3. Sit back and pray that no errors will occur.
 
 Yes, I love TypeScript, and I don't want compiling, so the awesome `ts-node` project is always my best saver.

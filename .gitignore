@@ -1,5 +1,6 @@
 node_modules
 
+/ms-auth.json
 /config.ts
 www/token.txt
 youtube.json

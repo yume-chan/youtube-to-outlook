@@ -6,8 +6,7 @@ import * as MicrosoftGraph from './microsoft';
 import config from '../config';
 import { AsyncDispatcher } from './async-dispatcher';
 import { EventBody, stripHtml, deepMerge } from './util';
-
-const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
+import OAuth2AuthorizationCodeFlow from './oauth2';
 
 function addSeconds(date: Date, value: number): Date {
     return new Date(date.getTime() + value * 1000);
@@ -325,7 +324,18 @@ export async function getCalendarViewSplit(
     if (typeof config.microsoftApiProxy === 'string') {
         MicrosoftGraph.setProxy(config.microsoftApiProxy);
     }
-    MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
+
+    const oauth = new OAuth2AuthorizationCodeFlow({
+        authorizeEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/authorize',
+        clientId: 'afbfb2f7-9e80-4195-a199-7448b22bc8e2',
+        redirectUri: 'http://localhost:3000/redirect',
+        scope: ['offline_access', 'Calendars.ReadWrite'],
+        tokenEndpoint: 'https://login.microsoftonline.com/common/oauth2/v2.0/token',
+    }, 'ms-auth.json');
+
+    MicrosoftGraph.setAccessTokenProvider(() => {
+        return oauth.getAccessToken();
+    });
 
     const calendars = await MicrosoftGraph.listCalendars(dispatcher);
     const calendar = calendars.value.find(x => x.name === config.outlookCalendarName);

@@ -6,8 +6,6 @@ import { AsyncDispatcher } from './async-dispatcher';
 import request, { isJsonRequestError } from './json-request';
 import { deepMerge } from './util';
 
-let accessToken: string;
-
 let agent: Agent = globalAgent;
 
 export function setProxy(value: string) {
@@ -21,7 +19,7 @@ async function requestApi(
     params?: object
 ): Promise<any> {
     let headers: HeadersInit = {
-        Authorization: `Bearer ${accessToken}`,
+        Authorization: `Bearer ${await getAccessToken()}`,
     };
 
     try {
@@ -39,8 +37,9 @@ async function requestApi(
     }
 }
 
-export function setAccessToken(value: string): void {
-    accessToken = value;
+let getAccessToken: () => Promise<string>;
+export function setAccessTokenProvider(provider: () => Promise<string>): void {
+    getAccessToken = provider;
 }
 
 export interface Calendar {
