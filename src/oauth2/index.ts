@@ -123,7 +123,7 @@ export default class OAuth2AuthorizationCodeFlow {
                 'Content-Type': 'application/x-www-form-urlencoded',
             },
             body: new URLSearchParams({
-                response_type: 'refresh_token',
+                grant_type: 'refresh_token',
                 ...this._config.tokenParameters,
                 client_id: this._config.clientId,
                 scope: this._config.scope.join(' '),

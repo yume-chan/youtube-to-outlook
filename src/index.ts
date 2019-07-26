@@ -212,10 +212,10 @@ export async function getCalendarViewSplit(
     let viewEnd = addDays(new Date(), 1).getTime();
     const videoToUpdate: Google.YouTubeDefinitions.VideoResponse[] = [];
 
-    let mode: 'fetch' | 'cache' | 'none' = 'fetch' as 'fetch' | 'cache' | 'none';
-    console.log(`mode is ${mode}`);
+    const dataSource = config.youtubeDataSource || 'fetch';
+    console.log(`dataSource is ${dataSource}`);
 
-    switch (mode) {
+    switch (dataSource) {
         case 'fetch':
             Google.setHeaders(config.googleApiHeaders);
             Google.setApiKey(config.googleApiKey);

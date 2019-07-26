@@ -4,6 +4,8 @@ export default interface Config {
      */
     googleApiKey: string;
 
+    youtubeDataSource?: 'fetch' | 'cache',
+
     /**
      * If you have set an HTTP referer restriction to your API Key,
      * add a `referer` header here.
