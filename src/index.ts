@@ -490,7 +490,11 @@ export async function getCalendarViewSplit(
         };
 
         const event: Partial<MicrosoftGraph.CalendarEvent> = {
-            subject: `${channelName} - ${filtered}`,
+            body: {
+                content: '',
+                contentType: 'text',
+            },
+
             start: {
                 dateTime: startTime,
                 timeZone: 'UTC',
@@ -499,12 +503,13 @@ export async function getCalendarViewSplit(
                 dateTime: endTime,
                 timeZone: 'UTC',
             },
-            body: {
-                content: '',
-                contentType: 'text',
-            },
-            recurrence: null,
+
+            isReminderOn: false,
             reminderMinutesBeforeStart: 5,
+
+            recurrence: null,
+
+            subject: `${channelName} - ${filtered}`,
         };
 
         if (!exist) {

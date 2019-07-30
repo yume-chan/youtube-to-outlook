@@ -73,18 +73,22 @@ interface DateTimeTimeZone {
 }
 
 export interface CalendarEvent {
+    id: string;
+
     body: ItemBody;
     bodyPreview: string;
-    id: string;
-    end: DateTimeTimeZone;
-    reminderMinutesBeforeStart: number;
-    start: DateTimeTimeZone;
-    recurrence: null;
-    subject: string;
 
-    seriesMasterId?: string;
+    start: DateTimeTimeZone;
+    end: DateTimeTimeZone;
+
+    isReminderOn: boolean;
+    reminderMinutesBeforeStart: number;
 
     type: 'singleInstance' | 'occurrence' | 'exception' | 'seriesMaster';
+    recurrence: null;
+    seriesMasterId?: string;
+
+    subject: string;
 }
 
 type Delta<T> = Partial<T> & { id: string;['@removed']?: { reason: string } };
