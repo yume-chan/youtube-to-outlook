@@ -1,5 +1,5 @@
 import { globalAgent, Agent } from 'https';
-import HttpsProxyAgent from 'https-proxy-agent';
+import ProxyAgent from 'proxy-agent';
 import { AsyncDispatcher } from './async-dispatcher';
 import request from './json-request';
 
@@ -13,7 +13,7 @@ export namespace Google {
     let agent: Agent = globalAgent;
 
     export function setProxy(value: string) {
-        agent = new HttpsProxyAgent(value);
+        agent = new ProxyAgent(value);
     }
 
     let headers: any;

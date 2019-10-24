@@ -1,5 +1,5 @@
 import { Agent } from 'https';
 
-export default class HttpsProxyAgent extends Agent {
+export default class ProxyAgent extends Agent {
     constructor(url: string);
 }

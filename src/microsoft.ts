@@ -1,7 +1,7 @@
 import { globalAgent, Agent } from 'https';
 import { URL } from 'url';
 import { HeadersInit } from 'node-fetch';
-import HttpsProxyAgent from 'https-proxy-agent';
+import ProxyAgent from 'proxy-agent';
 import { AsyncDispatcher } from './async-dispatcher';
 import request, { isJsonRequestError } from './json-request';
 import { deepMerge } from './util';
@@ -9,7 +9,7 @@ import { deepMerge } from './util';
 let agent: Agent = globalAgent;
 
 export function setProxy(value: string) {
-    agent = new HttpsProxyAgent(value);
+    agent = new ProxyAgent(value);
 }
 
 async function requestApi(
