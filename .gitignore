@@ -1,8 +1,11 @@
-node_modules
+.idea/
+.vscode/
+node_modules/
+build/
+tmp/
+temp/
 
 /ms-auth.json
 /config.ts
-www/token.txt
-youtube.json
-week.csv
-calendar.json
+videos.sqlite
+videos.sqlite-journal

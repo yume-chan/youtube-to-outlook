@@ -1,5 +1,7 @@
-﻿import { readFileSync, writeFileSync, existsSync } from 'fs';
+﻿import "reflect-metadata";
 
+import { createConnection } from "typeorm";
+import equal from 'fast-deep-equal';
 import { PromiseResolver } from '@yume-chan/async-operation-manager';
 
 import * as Yaml from './yaml';
@@ -9,6 +11,9 @@ import config from '../config';
 import { AsyncDispatcher } from './async-dispatcher';
 import { EventBody, stripHtml, deepMerge } from './util';
 import OAuth2AuthorizationCodeFlow from './oauth2';
+import { Video } from "./entity/video";
+import { Snippet } from "./entity/snippet";
+import { LiveStreamingDetails } from "./entity/live-streaming-details";
 
 function addSeconds(date: Date, value: number): Date {
     return new Date(date.getTime() + value * 1000);
@@ -132,7 +137,7 @@ export async function getCalendarViewSplit(
     const dispatcher: AsyncDispatcher = new AsyncDispatcher();
 
     let tasks: Promise<any>[];
-    const videos: Map<string, Google.YouTubeDefinitions.VideoResponse> = new Map();
+    const videos: Map<string, Video> = new Map();
 
     let publishedAfter: { [id: string]: Date } = {};
     for (const item of config.youtubeChannels) {
@@ -151,30 +156,22 @@ export async function getCalendarViewSplit(
         config.ignoreVideoIds = [];
     }
 
-    if (existsSync('youtube.json')) {
-        const list: Google.YouTubeDefinitions.VideoResponse[] = JSON.parse(readFileSync('youtube.json', 'utf-8'));
+    await createConnection();
 
-        for (const video of list) {
-            if (config.ignoreVideoIds.includes(video.id)) {
-                continue;
-            }
-
-            if (isInvalidVideo(video)) {
-                console.warn("WTF it's not a live stream? " + video.id);
-                continue;
-            }
-
-            const publishedAt = addDays(new Date(video.snippet.publishedAt), -30);
-            if (publishedAfter[video.snippet.channelId] < publishedAt) {
-                publishedAfter[video.snippet.channelId] = publishedAt;
-            }
-
-            videos.set(video.id, video);
-            idSet.add(video.id);
+    for (const video of await Video.find({ deleted: false })) {
+        if (config.ignoreVideoIds.includes(video.id)) {
+            continue;
         }
 
-        console.log(`${idSet.size} known ids before searching`);
+        const publishedAt = addDays(video.snippet.publishedAt, -30);
+        if (publishedAfter[video.snippet.channelId] < publishedAt) {
+            publishedAfter[video.snippet.channelId] = publishedAt;
+        }
+
+        videos.set(video.id, video);
+        idSet.add(video.id);
     }
+    console.log(`${idSet.size} known ids before searching`);
 
     if (typeof config.googleApiProxy === 'string') {
         Google.setProxy(config.googleApiProxy);
@@ -182,7 +179,7 @@ export async function getCalendarViewSplit(
 
     let viewStart = addDays(new Date(), -1).getTime();
     let viewEnd = addDays(new Date(), 1).getTime();
-    const videoToUpdate: Google.YouTubeDefinitions.VideoResponse[] = [];
+    const videoToUpdate: Video[] = [];
 
     const dataSource = config.youtubeDataSource || 'fetch';
     console.log(`dataSource is ${dataSource}`);
@@ -224,29 +221,55 @@ export async function getCalendarViewSplit(
                         id: ids.slice(i, i + pageSize),
                     });
 
-                    for (const video of result.items) {
-                        if (isInvalidVideo(video)) {
-                            console.warn("WTF it's not a live stream? " + video.id);
+                    for (const item of result.items) {
+                        if (isInvalidVideo(item)) {
+                            console.warn("WTF it's not a live stream? " + item.id);
                             continue;
                         }
 
-                        if (videos.has(video.id)) {
-                            const old = { ...videos.get(video.id)! };
-                            delete old.etag;
-                            delete video.etag;
+                        const video = new Video();
+                        video.id = item.id;
+                        video.deleted = false;
 
-                            // etag can be different even if other fields are the same.
-                            // doing a deep equality test without etag field.
-                            if (JSON.stringify(old) === JSON.stringify(video)) {
-                                // continue;
+                        const snippet = new Snippet();
+                        snippet.title = item.snippet.title;
+                        snippet.channelId = item.snippet.channelId;
+                        snippet.publishedAt = new Date(item.snippet.publishedAt);
+                        snippet.liveBroadcastContent = item.snippet.liveBroadcastContent;
+                        video.snippet = snippet;
+
+                        const liveStreamingDetails = new LiveStreamingDetails();
+                        liveStreamingDetails.scheduledStartTime =
+                            item.liveStreamingDetails.scheduledStartTime
+                                ? new Date(item.liveStreamingDetails.scheduledStartTime)
+                                : undefined;
+                        liveStreamingDetails.scheduledEndTime =
+                            item.liveStreamingDetails.scheduledEndTime
+                                ? new Date(item.liveStreamingDetails.scheduledEndTime)
+                                : undefined;
+                        liveStreamingDetails.actualStartTime =
+                            item.liveStreamingDetails.actualStartTime
+                                ? new Date(item.liveStreamingDetails.actualStartTime)
+                                : undefined;
+                        liveStreamingDetails.actualEndTime =
+                            item.liveStreamingDetails.actualEndTime
+                                ? new Date(item.liveStreamingDetails.actualEndTime)
+                                : undefined;
+                        video.liveStreamingDetails = liveStreamingDetails;
+
+                        if (videos.has(video.id)) {
+                            // do a deep equality test.
+                            if (equal(videos.get(video.id), video)) {
+                                continue;
                             }
                         }
 
+                        await video.save();
                         videoToUpdate.push(video);
 
-                        const eventTime = new Date(
+                        const eventTime = (
                             video.liveStreamingDetails.actualStartTime ||
-                            video.liveStreamingDetails.scheduledStartTime)
+                            video.liveStreamingDetails.scheduledStartTime!)
                             .getTime();
 
                         if (eventTime < viewStart) {
@@ -264,10 +287,6 @@ export async function getCalendarViewSplit(
 
             await bail(tasks);
 
-            const list = Array.from(videos.values());
-            list.sort((a, b) => a.snippet.channelId < b.snippet.channelId ? -1 : a.id < b.id ? -1 : 1);
-            writeFileSync('youtube.json', JSON.stringify(list, undefined, 4));
-
             if (videoToUpdate.length === 0) {
                 return;
             }
@@ -275,9 +294,9 @@ export async function getCalendarViewSplit(
             break;
         case 'cache':
             for (const video of videos.values()) {
-                const eventTime = new Date(
+                const eventTime = (
                     video.liveStreamingDetails.actualStartTime ||
-                    video.liveStreamingDetails.scheduledStartTime)
+                    video.liveStreamingDetails.scheduledStartTime!)
                     .getTime();
 
                 if (eventTime < viewStart) {
@@ -435,12 +454,12 @@ export async function getCalendarViewSplit(
         const title = video.snippet.title;
         const filtered = filterTitle(title);
 
-        const startTime = video.liveStreamingDetails.actualStartTime ||
-            video.liveStreamingDetails.scheduledStartTime;
+        const startTime = video.liveStreamingDetails.actualStartTime?.toISOString() ??
+            video.liveStreamingDetails.scheduledStartTime?.toISOString()!;
         const startTimeValue = new Date(startTime).getTime();
 
-        const endTime = video.liveStreamingDetails.actualEndTime ||
-            video.liveStreamingDetails.scheduledEndTime ||
+        const endTime = video.liveStreamingDetails.actualEndTime?.toISOString() ||
+            video.liveStreamingDetails.scheduledEndTime?.toISOString() ||
             (video.snippet.liveBroadcastContent === 'live'
                 ? new Date().toISOString()
                 : addHours(new Date(startTime), 1).toISOString());
