@@ -1,7 +1,9 @@
 import { globalAgent, Agent } from 'https';
 import ProxyAgent from 'proxy-agent';
-import { AsyncDispatcher } from './async-dispatcher';
+import { AsyncDispatcher, delay } from './async-dispatcher';
 import request from './json-request';
+
+const requestInterval = 200;
 
 export namespace Google {
     let key: string;
@@ -74,6 +76,8 @@ export namespace Google {
         }
 
         try {
+            const start = Date.now();
+
             const result = await request<any>('GET', dispatcher, `https://${host}${path}`, {
                 headers,
                 agent,
@@ -82,6 +86,11 @@ export namespace Google {
 
             if (typeof result === 'undefined') {
                 throw new Error('response is null');
+            }
+
+            const delta = requestInterval - (Date.now() - start);
+            if (delta > 0) {
+                await delay(delta);
             }
 
             return result;

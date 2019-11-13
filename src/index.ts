@@ -355,8 +355,8 @@ export async function getCalendarViewSplit(
 
         const alias = config.youtubeChannels.find(x => typeof x.alias !== 'undefined' && x.alias.includes(nickname));
         if (typeof alias !== 'undefined') {
-            nickname = alias.nickname;
-            event.subject = `${nickname}${subject ? ` - ${subject}` : ''}`;
+            event.subject = `${alias.nickname}${subject ? ` - ${subject}` : ''}`;
+            console.log(`rename ${nickname} to ${alias.nickname}`);
             tasks.push(retry(() => MicrosoftGraph.updateEvent(dispatcher, event.id, { subject: event.subject })));
         }
 
