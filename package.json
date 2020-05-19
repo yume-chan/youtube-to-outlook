@@ -25,7 +25,7 @@
    "devDependencies": {
       "@types/node": "12.12.39",
       "@types/open": "6.2.1",
-      "ts-node": "8.5.0",
+      "ts-node": "8.10.1",
       "typescript": "3.9.2"
    }
 }
