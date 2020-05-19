@@ -227,18 +227,24 @@ export async function getCalendarViewSplit(
                             continue;
                         }
 
-                        const video = new Video();
+                        let video: Video | undefined;
+                        video = await Video.findOne({ id: item.id });
+                        if (!video) {
+                            video = new Video();
+                            video.snippet = new Snippet();
+                            video.liveStreamingDetails = new LiveStreamingDetails();
+                        }
+
                         video.id = item.id;
                         video.deleted = false;
 
-                        const snippet = new Snippet();
+                        const snippet = video.snippet;
                         snippet.title = item.snippet.title;
                         snippet.channelId = item.snippet.channelId;
                         snippet.publishedAt = new Date(item.snippet.publishedAt);
                         snippet.liveBroadcastContent = item.snippet.liveBroadcastContent;
-                        video.snippet = snippet;
 
-                        const liveStreamingDetails = new LiveStreamingDetails();
+                        const liveStreamingDetails = video.liveStreamingDetails;
                         liveStreamingDetails.scheduledStartTime =
                             item.liveStreamingDetails.scheduledStartTime
                                 ? new Date(item.liveStreamingDetails.scheduledStartTime)
@@ -255,7 +261,6 @@ export async function getCalendarViewSplit(
                             item.liveStreamingDetails.actualEndTime
                                 ? new Date(item.liveStreamingDetails.actualEndTime)
                                 : undefined;
-                        video.liveStreamingDetails = liveStreamingDetails;
 
                         if (videos.has(video.id)) {
                             // do a deep equality test.
