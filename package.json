@@ -26,6 +26,6 @@
       "@types/node": "12.12.7",
       "@types/open": "6.2.1",
       "ts-node": "8.5.0",
-      "typescript": "3.7.2"
+      "typescript": "3.9.2"
    }
 }
