@@ -1,21 +1,14 @@
-import { readFileSync } from 'fs';
+import "reflect-metadata";
 
-import { AsyncDispatcher } from './async-dispatcher';
-import { Calendar } from './calendar';
-import * as MicrosoftGraph from './microsoft';
+import { createConnection } from "typeorm";
 
-const MicrosoftAccessToken = readFileSync('./www/token.txt', 'utf-8').trim();
+import { Video } from "./entity/video";
+import { Snippet } from "./entity/snippet";
+import { LiveStreamingDetails } from "./entity/live-streaming-details";
 
 (async () => {
-    MicrosoftGraph.setAccessToken(MicrosoftAccessToken);
-    const dispatcher = new AsyncDispatcher();
+    await createConnection();
 
-    const calendars = await MicrosoftGraph.listCalendars(dispatcher);
-
-    const calendarId = calendars.value.find(x => x.name === 'Vtuber')!.id;
-    const calendar = await Calendar.open('test-calendar.json', calendarId);
-    const startDateTime = new Date('2018-01-01T00:00:00Z');
-    const endDateTime = new Date('2019-12-31T00:00:00Z');
-
-    await MicrosoftGraph.getCalendarView(dispatcher, calendarId, startDateTime, endDateTime);
+    let video = await Video.findOne();
+    console.log(video?.snippet);
 })();

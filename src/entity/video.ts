@@ -11,11 +11,11 @@ export class Video extends BaseEntity {
     @Column()
     public deleted!: boolean;
 
-    @OneToOne(() => Snippet, { cascade: true })
+    @OneToOne(() => Snippet, { cascade: true, eager: true })
     @JoinColumn()
     public snippet!: Snippet;
 
-    @OneToOne(() => LiveStreamingDetails, { cascade: true })
+    @OneToOne(() => LiveStreamingDetails, { cascade: true, eager: true })
     @JoinColumn()
     public liveStreamingDetails!: LiveStreamingDetails;
 }
